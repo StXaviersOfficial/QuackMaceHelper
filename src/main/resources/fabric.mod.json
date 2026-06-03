@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "quackmacehelper",
+  "version": "${version}",
+  "name": "QuackMaceHelper",
+  "description": "Advanced PvP automation suite. Do /quackmace for the editor menu!",
+  "authors": ["StXaviersOfficial"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/quackmacehelper/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.quack.quackmacehelper.QuackMaceHelperClient"],
+    "modmenu": ["com.quack.quackmacehelper.ModMenuIntegration"]
+  },
+  "mixins": ["quackmacehelper.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "cloth-config2": "*",
+    "modmenu": "*"
+  }
+}

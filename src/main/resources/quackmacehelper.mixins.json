@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "com.quack.quackmacehelper.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ClientPlayerEntityMixin",
+    "GameRendererMixin",
+    "ClientPlayNetworkHandlerMixin",
+    "MouseMixin"
+  ],
+  "mixins": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
