@@ -57,12 +57,12 @@ public class AlwaysOnShieldFeature {
         int totemSlot  = findTotemSlot(player);
 
         if (shieldSlot != -1) {
-            prevSlot = player.getInventory().selectedSlot;
+            prevSlot = player.getInventory().getSelectedSlot();
             InventoryHelper.switchToSlot(client, shieldSlot);
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             active = true;
         } else if (totemSlot != -1) {
-            prevSlot = player.getInventory().selectedSlot;
+            prevSlot = player.getInventory().getSelectedSlot();
             InventoryHelper.switchToSlot(client, totemSlot);
             active = true;
         }
@@ -84,7 +84,7 @@ public class AlwaysOnShieldFeature {
                 : TargetHelper.findPlayerTarget(client, radius);
         if (t == null) return null;
         boolean falling = !t.isOnGround() && t.getVelocity().y < -0.1;
-        boolean gliding = t instanceof net.minecraft.entity.player.PlayerEntity pe && pe.isFallFlying();
+        boolean gliding = t instanceof net.minecraft.entity.player.PlayerEntity pe && pe.isGliding();
         if (!falling && !gliding) return null;
         if (!TargetHelper.isMovingToward(client, t)) return null;
         return t;

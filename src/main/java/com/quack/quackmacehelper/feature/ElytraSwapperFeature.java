@@ -29,7 +29,7 @@ public class ElytraSwapperFeature {
         ClientPlayerEntity player = client.player;
 
         // Must be gliding with elytra
-        if (!player.isFallFlying()) { reset(); return; }
+        if (!player.isGliding()) { reset(); return; }
 
         if (phase == 0) {
             LivingEntity t = findTarget(client, cfg);

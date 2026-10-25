@@ -6,6 +6,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
@@ -168,7 +169,7 @@ public class QuackMaceScreen extends Screen {
 
     private void addKeybind(int x, int y, String name, int keyCode, Consumer<Integer> cb) {
         String keyName = keyCode == -1 ? "§7[Unbound]"
-                : "§e" + InputUtil.fromKeyCode(keyCode, 0).getLocalizedText().getString();
+                : "§e" + InputUtil.fromKeyCode(new KeyInput(keyCode, 0, 0)).getLocalizedText().getString();
         // Set button
         addDrawableChild(ButtonWidget.builder(
                 Text.literal(name + ": " + keyName),
@@ -219,7 +220,8 @@ public class QuackMaceScreen extends Screen {
     // ── Key capture ──────────────────────────────────────────────────────
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyInput keyInput) {
+        int keyCode = keyInput.key();
         if (awaitingKey) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 awaitingKey = false;
@@ -231,7 +233,7 @@ public class QuackMaceScreen extends Screen {
             rebuild();
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(keyInput);
     }
 
     // ── Render ───────────────────────────────────────────────────────────

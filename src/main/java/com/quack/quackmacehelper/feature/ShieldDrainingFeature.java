@@ -51,7 +51,7 @@ public class ShieldDrainingFeature {
         // Find sword slot to remember
         if (prevSlot == -1) {
             int sword = InventoryHelper.findSwordSlot(player);
-            prevSlot = sword != -1 ? sword : player.getInventory().selectedSlot;
+            prevSlot = sword != -1 ? sword : player.getInventory().getSelectedSlot();
         }
 
         long nowMs = System.currentTimeMillis();

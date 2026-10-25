@@ -59,7 +59,7 @@ public class WindChargeTackleFeature {
         if (t == null) return null;
         // Must be falling or gliding
         boolean falling = !t.isOnGround() && t.getVelocity().y < -0.1;
-        boolean gliding = t instanceof net.minecraft.entity.player.PlayerEntity pe && pe.isFallFlying();
+        boolean gliding = t instanceof net.minecraft.entity.player.PlayerEntity pe && pe.isGliding();
         if (!falling && !gliding) return null;
         // Must be moving toward player
         if (!TargetHelper.isMovingToward(client, t)) return null;
@@ -71,7 +71,7 @@ public class WindChargeTackleFeature {
         double dist = player.distanceTo(target);
         int travelTicks = Math.max(1, (int)(dist / 1.5));
         Vec3d vel = target.getVelocity();
-        Vec3d future = target.getPos()
+        Vec3d future = target.getEntityPos()
                 .add(vel.x * travelTicks, vel.y * travelTicks, vel.z * travelTicks)
                 .add(0, target.getHeight() / 2.0, 0); // aim at center
 

@@ -3,11 +3,13 @@ package com.quack.quackmacehelper.keybind;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class KeyBindings {
 
-    public static final String CATEGORY = "key.category.quackmacehelper";
+    public static final KeyBinding.Category CATEGORY =
+            new KeyBinding.Category(Identifier.of("quackmacehelper", "main"));
 
     public static KeyBinding openGui;
     public static KeyBinding toggleAimAssist;

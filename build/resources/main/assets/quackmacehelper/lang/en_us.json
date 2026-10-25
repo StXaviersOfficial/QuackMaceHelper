@@ -1,0 +1,13 @@
+{
+  "quackmacehelper.title": "QuackMaceHelper",
+  "quackmacehelper.category.general": "General",
+  "quackmacehelper.category.attributeswap": "AttributeSwap",
+  "quackmacehelper.category.aimassist": "AimAssist",
+  "quackmacehelper.category.elytraswap": "ElytraSwapHit",
+  "quackmacehelper.category.stunslam": "StunSlam",
+  "quackmacehelper.category.pearlcatch": "PearlCatch",
+  "quackmacehelper.category.shielddraining": "ShieldDraining",
+  "quackmacehelper.enabled": "Enabled",
+  "quackmacehelper.hud.enabled": "§a%s Enabled",
+  "quackmacehelper.hud.disabled": "§c%s Disabled"
+}

@@ -4,8 +4,8 @@ import com.quack.quackmacehelper.config.ModConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.SwordItem;
 import net.minecraft.item.AxeItem;
+import net.minecraft.registry.tag.ItemTags;
 
 /**
  * BreachSwap: On sword/axe hit → switch to mace → hit again (same tick) → switch back to sword next tick.
@@ -21,11 +21,11 @@ public class BreachSwapFeature {
         if (client.player == null) return;
 
         ClientPlayerEntity player = client.player;
-        boolean holdingSword = player.getMainHandStack().getItem() instanceof SwordItem;
+        boolean holdingSword = player.getMainHandStack().isIn(ItemTags.SWORDS);
         boolean holdingAxe   = player.getMainHandStack().getItem() instanceof AxeItem;
         if (!holdingSword && !holdingAxe) return;
 
-        prevSlot = player.getInventory().selectedSlot;
+        prevSlot = player.getInventory().getSelectedSlot();
         boolean inAir = !player.isOnGround();
 
         int maceSlot = inAir
