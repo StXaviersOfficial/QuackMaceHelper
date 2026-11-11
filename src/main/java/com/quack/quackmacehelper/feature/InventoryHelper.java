@@ -5,9 +5,9 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.item.*;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.ItemTags;
 
 import java.util.Optional;
 
@@ -18,7 +18,7 @@ public class InventoryHelper {
     /** Returns hotbar slot (0-8) of first sword, or -1 */
     public static int findSwordSlot(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
-            if (player.getInventory().getStack(i).isIn(ItemTags.SWORDS)) return i;
+            if (player.getInventory().getStack(i).getItem() instanceof SwordItem) return i;
         }
         return -1;
     }
@@ -60,7 +60,7 @@ public class InventoryHelper {
     /** Returns hotbar slot of elytra chestplate item (held), or -1 */
     public static int findElytraInHotbar(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
-            if (player.getInventory().getStack(i).isOf(Items.ELYTRA)) return i;
+            if (player.getInventory().getStack(i).getItem() instanceof ElytraItem) return i;
         }
         return -1;
     }
@@ -84,57 +84,26 @@ public class InventoryHelper {
 
     // ── Swap helpers ─────────────────────────────────────────────────────────
 
-    /** Switches to hotbar slot instantly */
+    /**
+     * Switches to a hotbar slot AND tells the server immediately.
+     *
+     * CRITICAL (V4.1.1): writing only the client-side field is not enough.
+     * Vanilla sends {@link UpdateSelectedSlotC2SPacket} from
+     * ClientPlayerEntity.tick(), which runs BEFORE the mod's END_CLIENT_TICK
+     * hooks. Any feature that switches and attacks/uses in the same tick used
+     * to send the action packet BEFORE the slot packet, so the server resolved
+     * the action with the PREVIOUSLY held item — BreachSwap hit with the sword,
+     * and PearlCatch/WindChargeTackle (which switch and switch back within one
+     * tick) never sent a slot packet at all, so the wind charge was never
+     * actually thrown. Sending the packet explicitly here fixes all of them.
+     */
     public static void switchToSlot(MinecraftClient client, int slot) {
-        if (slot < 0 || slot > 8) return;
-        client.player.getInventory().setSelectedSlot(slot);
-    }
-
-    // ── Damage calculators ───────────────────────────────────────────────────
-
-    /**
-     * Calculates effective mace fall damage bonus for a given fall distance.
-     * Breach reduces armor; Density adds flat damage per block fallen.
-     * Returns expected damage for a rough comparison.
-     */
-    public static float estimateMaceDamage(ClientPlayerEntity player, int slot, double fallDistance, float targetArmor) {
-        ItemStack stack = player.getInventory().getStack(slot);
-        if (!isMace(stack)) return 0f;
-
-        float base = 6f; // base mace damage
-        float fallBonus = (float) (Math.max(0, fallDistance - 1.5) * 3);
-
-        int densityLevel = getEnchantmentLevel(stack, "density");
-        int breachLevel = getEnchantmentLevel(stack, "breach");
-
-        float densityBonus = (float) (densityLevel * fallDistance);
-        float breachArmorReduction = breachLevel * 0.15f; // reduces armor effectiveness
-
-        float effectiveArmor = targetArmor * (1f - breachArmorReduction);
-        float rawDamage = base + fallBonus + densityBonus;
-        float armorReduction = effectiveArmor / (effectiveArmor + 2f); // simplified
-
-        return rawDamage * (1f - armorReduction * 0.5f);
-    }
-
-    /**
-     * Picks the better mace slot (breach vs density) based on fall distance.
-     * On ground (fallDistance < 2), always prefer breach.
-     */
-    public static int pickBestMaceSlot(ClientPlayerEntity player, double fallDistance, float targetArmor) {
-        int breachSlot = findBreachMaceSlot(player);
-        int densitySlot = findDensityMaceSlot(player);
-
-        if (breachSlot == -1 && densitySlot == -1) return findAnyMaceSlot(player);
-        if (breachSlot == -1) return densitySlot;
-        if (densitySlot == -1) return breachSlot;
-
-        // On ground or low fall → always breach
-        if (fallDistance < 3) return breachSlot;
-
-        float breachDmg = estimateMaceDamage(player, breachSlot, fallDistance, targetArmor);
-        float densityDmg = estimateMaceDamage(player, densitySlot, fallDistance, targetArmor);
-        return densityDmg > breachDmg ? densitySlot : breachSlot;
+        if (slot < 0 || slot > 8 || client.player == null) return;
+        if (client.player.getInventory().selectedSlot == slot) return;
+        client.player.getInventory().selectedSlot = slot;
+        if (client.player.networkHandler != null) {
+            client.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+        }
     }
 
     // ── Checks ───────────────────────────────────────────────────────────────
@@ -143,8 +112,14 @@ public class InventoryHelper {
         return stack.getItem() == Items.MACE;
     }
 
+    /**
+     * True when the entity is ACTIVELY BLOCKING with a raised shield
+     * (getActiveItem is the shield AND isBlocking). This is the semantic the
+     * attack features want: the axe hit's shield-disable effect only applies
+     * against a raised shield.
+     */
     public static boolean isHoldingShield(net.minecraft.entity.LivingEntity entity) {
-        return entity.getActiveItem().getItem() == Items.SHIELD && entity.isBlocking();
+        return entity.isBlocking() && entity.getActiveItem().getItem() == Items.SHIELD;
     }
 
     private static boolean hasEnchantmentType(ItemStack stack, String enchId) {

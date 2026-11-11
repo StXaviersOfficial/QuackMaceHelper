@@ -1,13 +1,15 @@
 package com.quack.quackmacehelper;
 
+import com.quack.quackmacehelper.gui.QuackMaceScreen;
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;
-import me.shedaniel.autoconfig.AutoConfig;
-import com.quack.quackmacehelper.config.ModConfig;
 
 public class ModMenuIntegration implements ModMenuApi {
     @Override
     public ConfigScreenFactory<?> getModConfigScreenFactory() {
-        return parent -> AutoConfig.getConfigScreen(ModConfig.class, parent).get();
+        // Use our custom GUI, not AutoConfig's auto-generated one.
+        // V4.1.1: pass the parent through so ESC returns to the Mods list
+        // instead of dropping into the game.
+        return QuackMaceScreen::new;
     }
 }

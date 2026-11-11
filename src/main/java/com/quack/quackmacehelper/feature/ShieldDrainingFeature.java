@@ -1,69 +1,64 @@
 package com.quack.quackmacehelper.feature;
 
 import com.quack.quackmacehelper.config.ModConfig;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
 
+import java.util.Random;
+
 /**
- * ShieldDraining: While falling and target has shield up within 3 blocks,
- * hits with mace at set CPS. Stops ~0.5 blocks from ground, switches back to sword.
+ * ShieldDraining — V4.1 redesign (pure modifier).
+ *
+ * Per the design settled in the original development chats:
+ *   - It NEVER acts on its own. No tick(), no standalone targeting.
+ *   - It only activates INSIDE ElytraSwapper (or any other attack
+ *     sequence that asks for it) when a shield is detected.
+ *   - While active it SUPPRESSES axe hits from the sequence and
+ *     overrides the mace spam CPS with the configured value.
+ *   - CPS is randomized by ±10 around the configured value every
+ *     burst, for anti-cheat protection.
+ *   - The burst runs for a minimum duration (1.5 s) no matter what,
+ *     so it never stops "between" hits.
  */
 public class ShieldDrainingFeature {
 
-    private static long lastHitMs = 0;
-    private static int prevSlot = -1;
+    private static final Random RNG = new Random();
 
-    // Approximate: stop when fall distance indicates we're near ground
-    private static final float STOP_FALL_DIST = 0.5f;
+    /** Minimum drain burst duration — the sequence may not stop early. */
+    private static final long MIN_BURST_MS = 1500L;
 
-    public static void tick(MinecraftClient client) {
-        ModConfig cfg = ModConfig.get();
-        if (!cfg.shieldDraining.enabled) { prevSlot = -1; return; }
-        if (client.player == null) return;
+    private static boolean active = false;
+    private static long startMs = 0L;
+    private static long burstCps = 12L;
 
-        ClientPlayerEntity player = client.player;
+    // ── Modifier API — called by ElytraSwapper ─────────────────────────────
 
-        // Only while falling
-        if (player.isOnGround()) {
-            if (prevSlot != -1) {
-                InventoryHelper.switchToSlot(client, prevSlot);
-                prevSlot = -1;
-            }
-            return;
-        }
-
-        // Stop near ground — velocity approaching 0 from below or tiny fall distance remaining
-        double vy = player.getVelocity().y;
-        if (vy > -0.08 && player.fallDistance > 0.5f) {
-            if (prevSlot != -1) {
-                InventoryHelper.switchToSlot(client, prevSlot);
-                prevSlot = -1;
-            }
-            return;
-        }
-
-        LivingEntity target = AimAssistFeature.getCurrentTarget();
-        if (target == null) return;
-        if (!InventoryHelper.isHoldingShield(target)) return;
-        if (player.distanceTo(target) > 3.0f) return;
-
-        // Find sword slot to remember
-        if (prevSlot == -1) {
-            int sword = InventoryHelper.findSwordSlot(player);
-            prevSlot = sword != -1 ? sword : player.getInventory().getSelectedSlot();
-        }
-
-        long nowMs = System.currentTimeMillis();
-        long intervalMs = 1000L / cfg.shieldDraining.cps;
-        long variance = (long)(Math.random() * 10 - 5);
-        if (nowMs - lastHitMs < intervalMs + variance) return;
-
-        int mace = InventoryHelper.findAnyMaceSlot(player);
-        if (mace == -1) return;
-
-        InventoryHelper.switchToSlot(client, mace);
-        client.interactionManager.attackEntity(player, target);
-        lastHitMs = nowMs;
+    /** Start (or keep) a drain burst. Idempotent. */
+    public static void start(LivingEntity t) {
+        if (active) return; // never reset mid-burst
+        int cfgCps = Math.max(1, ModConfig.get().shieldDraining.cps);
+        // ±10 CPS variance, clamped to >= 1 — anti-cheat randomization
+        int variance = RNG.nextInt(21) - 10;
+        burstCps = Math.max(1L, cfgCps + variance);
+        startMs = System.currentTimeMillis();
+        active = true;
     }
+
+    /** Milliseconds to wait between mace hits. Jitters slightly per call. */
+    public static long getIntervalMs() {
+        return (long) Math.ceil(1000.0 / burstCps) + RNG.nextInt(12);
+    }
+
+    /** True once the minimum burst duration has elapsed (sequence may stop). */
+    public static boolean minDurationElapsed() {
+        return System.currentTimeMillis() - startMs >= MIN_BURST_MS;
+    }
+
+    /** Ends the burst. Call when the owning sequence finishes. */
+    public static void stop() {
+        active = false;
+    }
+
+    // ── State accessors ─────────────────────────────────────────────────────
+
+    public static boolean isActive() { return active; }
 }

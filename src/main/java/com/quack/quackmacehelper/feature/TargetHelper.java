@@ -38,17 +38,6 @@ public class TargetHelper {
                 .orElse(null);
     }
 
-    /** Finds target within given radius, players only (for WindChargeTackle / AlwaysOnShield) */
-    public static LivingEntity findPlayerTarget(MinecraftClient client, double radius) {
-        if (client.player == null || client.world == null) return null;
-        Box box = client.player.getBoundingBox().expand(radius);
-        return client.world.getEntitiesByClass(PlayerEntity.class, box,
-                e -> e != client.player && e.isAlive() && e.distanceTo(client.player) <= radius)
-                .stream()
-                .min(Comparator.comparingDouble(e -> e.distanceTo(client.player)))
-                .orElse(null);
-    }
-
     public static boolean isValidTarget(LivingEntity e, ModConfig cfg) {
         if (e instanceof PlayerEntity) return cfg.targetPlayers;
         if (e instanceof AnimalEntity)  return cfg.targetAnimals;
@@ -67,17 +56,8 @@ public class TargetHelper {
     public static double angleToEntity(MinecraftClient client, LivingEntity entity) {
         if (client.player == null) return Double.MAX_VALUE;
         Vec3d look = client.player.getRotationVec(1.0f);
-        Vec3d toEntity = entity.getEntityPos().subtract(client.player.getEyePos()).normalize();
+        Vec3d toEntity = entity.getPos().subtract(client.player.getEyePos()).normalize();
         double dot = Math.max(-1.0, Math.min(1.0, look.dotProduct(toEntity)));
         return Math.toDegrees(Math.acos(dot));
-    }
-
-    /** Returns true if the entity appears to be moving/flying toward the client player */
-    public static boolean isMovingToward(MinecraftClient client, LivingEntity entity) {
-        if (client.player == null) return false;
-        Vec3d vel = entity.getVelocity();
-        if (vel.lengthSquared() < 0.001) return false;
-        Vec3d toPlayer = client.player.getEntityPos().subtract(entity.getEntityPos()).normalize();
-        return vel.normalize().dotProduct(toPlayer) > 0.5;
     }
 }

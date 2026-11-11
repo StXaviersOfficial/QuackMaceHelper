@@ -3,8 +3,8 @@
   "id": "quackmacehelper",
   "version": "${version}",
   "name": "QuackMaceHelper",
-  "description": "Advanced PvP automation suite. Do /quackmace for the editor menu!",
-  "authors": ["StXaviersOfficial"],
+  "description": "Advanced PvP automation suite. Open the menu via Mod Menu or the Open Menu keybind.",
+  "authors": ["Quack"],
   "contact": {},
   "license": "MIT",
   "icon": "assets/quackmacehelper/icon.png",
@@ -15,10 +15,12 @@
   },
   "mixins": ["quackmacehelper.mixins.json"],
   "depends": {
-    "fabricloader": ">=0.20.1",
+    "fabricloader": ">=0.15.0",
     "fabric-api": "*",
-    "minecraft": "~1.21.11",
-    "cloth-config2": "*",
+    "minecraft": "~1.21.1",
+    "cloth-config2": "*"
+  },
+  "recommends": {
     "modmenu": "*"
   }
 }

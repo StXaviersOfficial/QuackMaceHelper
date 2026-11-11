@@ -1,45 +1,34 @@
 package com.quack.quackmacehelper.mixin;
 
-import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.quack.quackmacehelper.feature.AimAssistFeature;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.Mouse;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * 1.21.11: Mouse.updateMouse() no longer takes delta args. The smoothed
- * deltas are produced by two Smoother.smooth() calls inside the method
- * (ordinal 0 = X, ordinal 1 = Y). We adjust them right after smoothing —
- * the same values the player-turn logic consumes.
- */
 @Mixin(Mouse.class)
 public class MouseMixin {
 
-    @Shadow @Final private MinecraftClient client;
+    // Yarn 1.21.1 — the two accumulated raw mouse deltas before they are
+    // consumed by updateMouse() to turn the camera.
+    @Shadow private double cursorDeltaX;
+    @Shadow private double cursorDeltaY;
 
-    @ModifyExpressionValue(
-            method = "updateMouse",
-            at = @org.spongepowered.asm.mixin.injection.At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/util/math/Smoother;smooth(DD)D",
-                    ordinal = 0)
-    )
-    private double modifyMouseX(double smoothedX) {
-        double[] adjusted = AimAssistFeature.onMouseUpdate(client, smoothedX, 0);
-        return adjusted[0];
-    }
-
-    @ModifyExpressionValue(
-            method = "updateMouse",
-            at = @org.spongepowered.asm.mixin.injection.At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/util/math/Smoother;smooth(DD)D",
-                    ordinal = 1)
-    )
-    private double modifyMouseY(double smoothedY) {
-        double[] adjusted = AimAssistFeature.onMouseUpdate(client, 0, smoothedY);
-        return adjusted[1];
+    /**
+     * Inject at HEAD of updateMouse so we intercept BOTH axes in one call,
+     * exactly like Wurst's handleAccumulatedMovement hook.
+     *
+     * We read the current accumulated deltas, let AimAssist add its
+     * rotation nudge on top, then write them back before MC processes them.
+     * This means the player's own mouse movement is fully preserved —
+     * AimAssist only adds on top of it (or subtracts if overshoot).
+     */
+    @Inject(method = "updateMouse", at = @At("HEAD"))
+    private void onUpdateMouse(CallbackInfo ci) {
+        double[] adjusted = AimAssistFeature.onMouseUpdate(cursorDeltaX, cursorDeltaY);
+        cursorDeltaX = adjusted[0];
+        cursorDeltaY = adjusted[1];
     }
 }

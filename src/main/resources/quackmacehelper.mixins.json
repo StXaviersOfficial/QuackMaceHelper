@@ -3,9 +3,7 @@
   "package": "com.quack.quackmacehelper.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "ClientPlayerEntityMixin",
-    "GameRendererMixin",
-    "ClientPlayNetworkHandlerMixin",
+    "ClientPlayerInteractionManagerMixin",
     "MouseMixin"
   ],
   "mixins": [],

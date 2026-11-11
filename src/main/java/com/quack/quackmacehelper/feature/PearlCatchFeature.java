@@ -5,114 +5,151 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.List;
+import java.util.Random;
 
 /**
- * PearlCatch: When YOUR pearl goes above triggerHeight blocks,
- * calculates exact intercept point, aims there, fires exactly 1 wind charge.
+ * PearlCatch — Stage 4 polish.
+ *
+ * Fires a wind charge to intercept the player's own ender pearl mid-flight,
+ * knocking them upward at the pearl's landing point for a mace combo.
+ *
+ * Anti-cheat polish:
+ *   - Intercept point gets a small random offset (±0.15 blocks) so the aim
+ *     isn't a robotically perfect ballistic solution every single time.
+ *   - Physics simulation unchanged (still accurate enough to hit).
  */
 public class PearlCatchFeature {
 
-    private static EnderPearlEntity trackedPearl = null;
-    private static int countdown = -1;
-    private static boolean fired = false;
+    private static final Random RNG = new Random();
 
-    // Wind charge approximate speed (blocks per tick)
+    private static EnderPearlEntity trackedPearl  = null;
+    private static int              countdown      = -1;
+    private static boolean          fired          = false;
+    private static boolean          pearlWasAlive  = false;
+    private static boolean          autoReady      = false;
+
     private static final double WIND_CHARGE_SPEED = 1.5;
+    private static final int    SOLVER_ITERATIONS = 8;
+    private static final double PEARL_GRAVITY     = 0.03;
+    private static final double PEARL_DRAG        = 0.99;
 
     public static void tick(MinecraftClient client) {
         ModConfig cfg = ModConfig.get();
         if (!cfg.pearlCatch.enabled) { reset(); return; }
         if (client.player == null || client.world == null) return;
 
-        ClientPlayerEntity player = client.player;
+        // Never auto-use items while a GUI is open (anticheat safety).
+        if (client.currentScreen != null) return;
 
-        // Find our pearl
-        if (trackedPearl == null || !trackedPearl.isAlive()) {
-            trackedPearl = findOurPearl(client);
-            fired = false;
-            countdown = -1;
+        ClientPlayerEntity player = client.player;
+        EnderPearlEntity   pearl  = findOurPearl(client);
+
+        if (pearl == null) {
+            if (pearlWasAlive) reset();
+            pearlWasAlive = false;
+            trackedPearl  = null;
             return;
+        }
+
+        pearlWasAlive = true;
+        if (trackedPearl == null) {
+            trackedPearl = pearl;
+            fired        = false;
+            autoReady    = false;
+            countdown    = cfg.pearlCatch.manualMode ? cfg.pearlCatch.delayTicks : -1;
         }
 
         if (fired) return;
 
-        double heightAbovePlayer = trackedPearl.getY() - player.getY();
-        if (heightAbovePlayer < cfg.pearlCatch.triggerHeight) return;
-
-        // Check we have wind charge
         int wcSlot = InventoryHelper.findWindChargeSlot(player);
-        if (wcSlot == -1) { reset(); return; }
+        if (wcSlot == -1) return;
 
-        // Start countdown
-        if (countdown == -1) {
-            countdown = cfg.pearlCatch.delayTicks;
+        if (cfg.pearlCatch.manualMode) {
+            if (countdown > 0) { countdown--; return; }
+            fireAt(client, player, pearl, wcSlot, true);
+
+        } else {
+            double heightAbove = trackedPearl.getY() - player.getY();
+            if (heightAbove < cfg.pearlCatch.triggerHeight) return;
+            if (!autoReady) { autoReady = true; return; } // 1-tick buffer
+            fireAt(client, player, pearl, wcSlot, false);
+        }
+    }
+
+    /**
+     * @param manual true when the user fired in manual mode — the camera is
+     *               NEVER redirected at the pearl (the user aims themselves);
+     *               we only switch to the wind charge and right-click it.
+     */
+    private static void fireAt(MinecraftClient client, ClientPlayerEntity player,
+                                EnderPearlEntity pearl, int wcSlot, boolean manual) {
+        double px  = pearl.getX(),  py  = pearl.getY(),  pz  = pearl.getZ();
+        double pvx = pearl.getVelocity().x;
+        double pvy = pearl.getVelocity().y;
+        double pvz = pearl.getVelocity().z;
+
+        Vec3d  eyes  = player.getEyePos();
+        double dist  = eyes.distanceTo(new Vec3d(px, py, pz));
+        int    ticks = Math.max(1, (int)(dist / WIND_CHARGE_SPEED));
+        Vec3d intercept = new Vec3d(px, py, pz);
+
+        for (int i = 0; i < SOLVER_ITERATIONS; i++) {
+            intercept = simulatePearl(px, py, pz, pvx, pvy, pvz, ticks);
+            double nd = eyes.distanceTo(intercept);
+            int nt = Math.max(1, (int)(nd / WIND_CHARGE_SPEED));
+            if (nt == ticks) break;
+            ticks = nt;
         }
 
-        if (countdown > 0) {
-            countdown--;
-            return;
+        // Small random offset — aim looks human, still accurate enough to hit
+        intercept = intercept.add(
+            (RNG.nextDouble() - 0.5) * 0.3,
+            (RNG.nextDouble() - 0.5) * 0.2,
+            (RNG.nextDouble() - 0.5) * 0.3
+        );
+
+        // Manual mode: no auto-aim at all — the camera never redirects at
+        // the pearl, the wind charge flies wherever the player is aiming.
+        if (!manual) {
+            AimAssistFeature.snapAimAt(client, intercept);
         }
-
-        // Fire! Calculate intercept
-        // Estimate travel time for wind charge to reach current pearl distance
-        double dist = player.distanceTo(trackedPearl);
-        int travelTicks = Math.max(1, (int)(dist / WIND_CHARGE_SPEED));
-
-        // Predict pearl position at that time
-        Vec3d intercept = predictPearl(trackedPearl, travelTicks);
-
-        // Aim exactly at intercept
-        aimAt(client, player, intercept);
-
-        // Switch to wind charge and fire
+        int prevSlot = player.getInventory().selectedSlot;
         InventoryHelper.switchToSlot(client, wcSlot);
         client.interactionManager.interactItem(player, Hand.MAIN_HAND);
-
+        InventoryHelper.switchToSlot(client, prevSlot);
         fired = true;
     }
 
-    private static Vec3d predictPearl(EnderPearlEntity pearl, int ticks) {
-        double x = pearl.getX(), y = pearl.getY(), z = pearl.getZ();
-        double vx = pearl.getVelocity().x;
-        double vy = pearl.getVelocity().y;
-        double vz = pearl.getVelocity().z;
-        double gravity = 0.03;
-        double drag = 0.99;
-
+    private static Vec3d simulatePearl(double x, double y, double z,
+                                        double vx, double vy, double vz, int ticks) {
+        // Vanilla order: DRAG first, then gravity. The old gravity-then-drag
+        // order damped gravity itself, so long flights drifted low.
         for (int i = 0; i < ticks; i++) {
-            vy -= gravity;
-            vx *= drag; vy *= drag; vz *= drag;
+            vx *= PEARL_DRAG; vy *= PEARL_DRAG; vz *= PEARL_DRAG;
+            vy -= PEARL_GRAVITY;
             x += vx; y += vy; z += vz;
         }
         return new Vec3d(x, y, z);
     }
 
-    private static void aimAt(MinecraftClient client, ClientPlayerEntity player, Vec3d target) {
-        Vec3d d = target.subtract(player.getEyePos());
-        double hDist = Math.sqrt(d.x * d.x + d.z * d.z);
-        float yaw   = (float) Math.toDegrees(Math.atan2(-d.x, d.z));
-        float pitch = (float) -Math.toDegrees(Math.atan2(d.y, hDist));
-        player.setYaw(yaw);
-        player.setPitch(MathHelper.clamp(pitch, -90f, 90f));
-    }
-
     private static EnderPearlEntity findOurPearl(MinecraftClient client) {
         if (client.player == null || client.world == null) return null;
         List<EnderPearlEntity> list = client.world.getEntitiesByClass(
-                EnderPearlEntity.class,
-                client.player.getBoundingBox().expand(128),
-                p -> p.getOwner() == client.player
+            EnderPearlEntity.class,
+            client.player.getBoundingBox().expand(128),
+            p -> p.getOwner() == client.player
         );
         return list.isEmpty() ? null : list.get(0);
     }
 
+    /** Public hard reset — called when the player disconnects. */
+    public static void hardReset() { reset(); }
+
     private static void reset() {
-        trackedPearl = null;
-        countdown = -1;
-        fired = false;
+        trackedPearl = null; countdown = -1;
+        fired = false; pearlWasAlive = false; autoReady = false;
     }
 }

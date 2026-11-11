@@ -12,7 +12,9 @@ import java.util.List;
 public class HudOverlay {
 
     private static final List<HudMessage> messages = new ArrayList<>();
-    private static final int DISPLAY_TICKS = 50; // ~2.5 seconds at 20tps
+    /** Time-based: ~2.5 seconds. The old tick-based counter was decremented
+     *  every render FRAME, so it faded in ~1s at 50fps (instantly at high fps). */
+    private static final long DISPLAY_MS = 2500L;
 
     public static void register() {
         HudRenderCallback.EVENT.register(HudOverlay::onHudRender);
@@ -22,7 +24,7 @@ public class HudOverlay {
         String colored = enabled ? "§a" + text + " Enabled" : "§c" + text + " Disabled";
         // Remove existing message for same feature
         messages.removeIf(m -> m.feature.equals(text));
-        messages.add(new HudMessage(text, colored, DISPLAY_TICKS));
+        messages.add(new HudMessage(text, colored, DISPLAY_MS));
     }
 
     private static void onHudRender(DrawContext context, RenderTickCounter tickCounter) {
@@ -38,10 +40,10 @@ public class HudOverlay {
         Iterator<HudMessage> it = messages.iterator();
         int offset = 0;
         List<HudMessage> toRender = new ArrayList<>();
+        long now = System.currentTimeMillis();
         while (it.hasNext()) {
             HudMessage msg = it.next();
-            msg.ticksLeft--;
-            if (msg.ticksLeft <= 0) {
+            if (now >= msg.expiresAt) {
                 it.remove();
             } else {
                 toRender.add(msg);
@@ -50,7 +52,8 @@ public class HudOverlay {
 
         for (int i = toRender.size() - 1; i >= 0; i--) {
             HudMessage msg = toRender.get(i);
-            float alpha = msg.ticksLeft < 10 ? msg.ticksLeft / 10f : 1f;
+            long left = msg.expiresAt - now;
+            float alpha = left < 500 ? left / 500f : 1f;
             int alphaInt = (int)(alpha * 255) << 24;
             int textWidth = client.textRenderer.getWidth(msg.text);
             int x = (screenWidth - textWidth) / 2;
@@ -63,12 +66,12 @@ public class HudOverlay {
     private static class HudMessage {
         String feature;
         String text;
-        int ticksLeft;
+        long expiresAt;
 
-        HudMessage(String feature, String text, int ticksLeft) {
+        HudMessage(String feature, String text, long durationMs) {
             this.feature = feature;
             this.text = text;
-            this.ticksLeft = ticksLeft;
+            this.expiresAt = System.currentTimeMillis() + durationMs;
         }
     }
 }
