@@ -57,7 +57,7 @@ public class AlwaysOnShieldFeature {
                 || StunSlamFeature.isRunning()
                 || BreachSwapFeature.isSwapping();
         if (!modOwnsSlot && active && lastKnownSlot != -1
-                && player.getInventory().selectedSlot != lastKnownSlot) {
+                && player.getInventory().getSelectedSlot() != lastKnownSlot) {
             deactivate(client);
             return;
         }
@@ -76,7 +76,7 @@ public class AlwaysOnShieldFeature {
             int equipSlot = ss != -1 ? ss : ts;
             if (equipSlot == -1) return; // nothing to equip
 
-            prevSlot  = player.getInventory().selectedSlot;
+            prevSlot  = player.getInventory().getSelectedSlot();
             shieldSlot = equipSlot;
             InventoryHelper.switchToSlot(client, equipSlot);
             lastKnownSlot = equipSlot;
@@ -93,19 +93,19 @@ public class AlwaysOnShieldFeature {
             client.options.useKey.setPressed(true);
         }
 
-        lastKnownSlot = player.getInventory().selectedSlot;
+        lastKnownSlot = player.getInventory().getSelectedSlot();
     }
 
     private static LivingEntity findThreat(MinecraftClient client, float radius) {
         if (client.player == null || client.world == null) return null;
-        Vec3d ourPos = client.player.getPos();
+        Vec3d ourPos = client.player.getEntityPos();
 
         return client.world.getEntitiesByClass(PlayerEntity.class,
             client.player.getBoundingBox().expand(radius), e -> {
                 if (e == client.player || !e.isAlive()) return false;
                 if (client.player.distanceTo(e) > radius) return false;
 
-                Vec3d toUs = ourPos.subtract(e.getPos()).normalize();
+                Vec3d toUs = ourPos.subtract(e.getEntityPos()).normalize();
 
                 // Velocity toward us
                 Vec3d vel = e.getVelocity();
@@ -118,7 +118,7 @@ public class AlwaysOnShieldFeature {
                 double lookDot = look.dotProduct(toUs);
                 if (lookDot < LOOK_THRESHOLD) return false;
 
-                boolean gliding = e.isFallFlying();
+                boolean gliding = e.isGliding();
                 boolean falling = !e.isOnGround() && e.getVelocity().y < -0.1;
 
                 // Condition A: gliding toward us

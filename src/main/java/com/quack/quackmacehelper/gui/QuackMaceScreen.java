@@ -280,9 +280,11 @@ public class QuackMaceScreen extends Screen {
 
     // ── Key capture ──────────────────────────────────────────────────────
 
+    /** 1.21.11: input events are now objects — keyPressed(KeyInput). */
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(net.minecraft.client.input.KeyInput keyInput) {
         if (awaitingKey) {
+            int keyCode = keyInput.key();
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 awaitingKey = false;
                 rebuild();
@@ -293,17 +295,19 @@ public class QuackMaceScreen extends Screen {
             rebuild();
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(keyInput);
     }
 
     /**
      * While "Press any key..." is up, widget clicks are swallowed (the old
      * overlay was purely visual — buttons under it still fired). A mouse
      * click instead BINDS that mouse button (encoded as 500+button).
+     * 1.21.11: mouseClicked now takes a Click record.
      */
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean doubled) {
         if (awaitingKey) {
+            int button = click.button();
             if (button <= 7) {
                 awaitingCallback.accept(com.quack.quackmacehelper.keybind.KeyBindings.MOUSE_BASE + button);
             }
@@ -311,7 +315,7 @@ public class QuackMaceScreen extends Screen {
             rebuild();
             return true;
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(click, doubled);
     }
 
     // ── Render ───────────────────────────────────────────────────────────

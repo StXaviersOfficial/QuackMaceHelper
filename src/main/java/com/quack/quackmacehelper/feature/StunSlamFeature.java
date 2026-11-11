@@ -64,7 +64,7 @@ public class StunSlamFeature {
                     && (player.fallDistance >= 1.5f || player.getVelocity().y < -0.3);
             if (!falling) return;
             // Elytra gliding is ElytraSwapper's job, not ours.
-            if (player.isFallFlying()) return;
+            if (player.isGliding()) return;
 
             LivingEntity t = findTarget(client, player);
             if (t == null) return;

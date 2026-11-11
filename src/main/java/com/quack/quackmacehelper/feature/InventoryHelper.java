@@ -15,10 +15,12 @@ public class InventoryHelper {
 
     // ── Slot finders ────────────────────────────────────────────────────────
 
-    /** Returns hotbar slot (0-8) of first sword, or -1 */
+    /** Returns hotbar slot (0-8) of first sword, or -1.
+     *  1.21.11: SwordItem class no longer exists (swords are plain Items) —
+     *  detection goes through the vanilla #minecraft:swords item tag. */
     public static int findSwordSlot(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
-            if (player.getInventory().getStack(i).getItem() instanceof SwordItem) return i;
+            if (player.getInventory().getStack(i).isIn(net.minecraft.registry.tag.ItemTags.SWORDS)) return i;
         }
         return -1;
     }
@@ -57,10 +59,10 @@ public class InventoryHelper {
         return -1;
     }
 
-    /** Returns hotbar slot of elytra chestplate item (held), or -1 */
+    /** Returns hotbar slot of elytra (plain Item in 1.21.11 — no ElytraItem class). */
     public static int findElytraInHotbar(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
-            if (player.getInventory().getStack(i).getItem() instanceof ElytraItem) return i;
+            if (player.getInventory().getStack(i).getItem() == Items.ELYTRA) return i;
         }
         return -1;
     }
@@ -99,8 +101,8 @@ public class InventoryHelper {
      */
     public static void switchToSlot(MinecraftClient client, int slot) {
         if (slot < 0 || slot > 8 || client.player == null) return;
-        if (client.player.getInventory().selectedSlot == slot) return;
-        client.player.getInventory().selectedSlot = slot;
+        if (client.player.getInventory().getSelectedSlot() == slot) return;
+        client.player.getInventory().setSelectedSlot(slot);
         if (client.player.networkHandler != null) {
             client.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot));
         }

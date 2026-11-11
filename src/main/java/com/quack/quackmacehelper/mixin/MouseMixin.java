@@ -20,13 +20,16 @@ public class MouseMixin {
      * Inject at HEAD of updateMouse so we intercept BOTH axes in one call,
      * exactly like Wurst's handleAccumulatedMovement hook.
      *
+     * 1.21.11: updateMouse(double) takes the frame-delta parameter now —
+     * the handler must mirror it before the CallbackInfo.
+     *
      * We read the current accumulated deltas, let AimAssist add its
      * rotation nudge on top, then write them back before MC processes them.
      * This means the player's own mouse movement is fully preserved —
      * AimAssist only adds on top of it (or subtracts if overshoot).
      */
     @Inject(method = "updateMouse", at = @At("HEAD"))
-    private void onUpdateMouse(CallbackInfo ci) {
+    private void onUpdateMouse(double delta, CallbackInfo ci) {
         double[] adjusted = AimAssistFeature.onMouseUpdate(cursorDeltaX, cursorDeltaY);
         cursorDeltaX = adjusted[0];
         cursorDeltaY = adjusted[1];

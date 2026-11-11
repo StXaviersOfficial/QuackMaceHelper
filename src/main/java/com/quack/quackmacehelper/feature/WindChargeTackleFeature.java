@@ -116,7 +116,7 @@ public class WindChargeTackleFeature {
 
         AimAssistFeature.snapAimAt(client, intercept);
 
-        int prevSlot = player.getInventory().selectedSlot;
+        int prevSlot = player.getInventory().getSelectedSlot();
         InventoryHelper.switchToSlot(client, wcSlot);
         client.interactionManager.interactItem(player, Hand.MAIN_HAND);
         InventoryHelper.switchToSlot(client, prevSlot);
@@ -128,20 +128,20 @@ public class WindChargeTackleFeature {
 
     private static LivingEntity findThreat(MinecraftClient client, float radius) {
         if (client.player == null || client.world == null) return null;
-        Vec3d ourPos = client.player.getPos();
+        Vec3d ourPos = client.player.getEntityPos();
 
         return client.world.getEntitiesByClass(PlayerEntity.class,
             client.player.getBoundingBox().expand(radius), e -> {
                 if (e == client.player || !e.isAlive()) return false;
 
                 boolean falling = !e.isOnGround() && e.getVelocity().y < -0.05;
-                boolean gliding = e.isFallFlying();
+                boolean gliding = e.isGliding();
                 if (!falling && !gliding) return false;
 
                 // Must be at least 5 blocks above us
                 if (e.getY() - client.player.getY() < 5.0) return false;
 
-                Vec3d toUs = ourPos.subtract(e.getPos()).normalize();
+                Vec3d toUs = ourPos.subtract(e.getEntityPos()).normalize();
 
                 Vec3d vel = e.getVelocity();
                 if (vel.lengthSquared() < 0.001) return false;
@@ -159,7 +159,7 @@ public class WindChargeTackleFeature {
     }
 
     private static Vec3d solveIntercept(Vec3d eyes, LivingEntity target) {
-        Vec3d pos = target.getPos().add(0, target.getHeight() / 2.0, 0);
+        Vec3d pos = target.getEntityPos().add(0, target.getHeight() / 2.0, 0);
         Vec3d vel = target.getVelocity();
         int ticks = Math.max(1, (int)(eyes.distanceTo(pos) / WIND_CHARGE_SPEED));
         for (int i = 0; i < SOLVER_ITERATIONS; i++) {

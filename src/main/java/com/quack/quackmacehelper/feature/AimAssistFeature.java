@@ -3,9 +3,6 @@ package com.quack.quackmacehelper.feature;
 import com.quack.quackmacehelper.config.ModConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.SwordItem;
-import net.minecraft.item.AxeItem;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -178,8 +175,8 @@ public class AimAssistFeature {
         if (randomize) s = Math.max(100f, s + (float)(RNG.nextGaussian() * randomRange * 0.5));
         float maxChange = s / 20f;
 
-        float startYaw   = client.player.prevYaw;
-        float startPitch = client.player.prevPitch;
+        float startYaw   = client.player.lastYaw;
+        float startPitch = client.player.lastPitch;
 
         float yDelta = Math.abs(MathHelper.wrapDegrees(wantYaw   - startYaw));
         float pDelta = Math.abs(MathHelper.wrapDegrees(wantPitch - startPitch));
@@ -201,8 +198,8 @@ public class AimAssistFeature {
         float wantPitch = (float)-Math.toDegrees(Math.atan2(diffY, diffXZ));
 
         float maxStep = speed / 20f;
-        float startYaw   = client.player.prevYaw;
-        float startPitch = client.player.prevPitch;
+        float startYaw   = client.player.lastYaw;
+        float startPitch = client.player.lastPitch;
         float yDelta = Math.abs(MathHelper.wrapDegrees(wantYaw   - startYaw));
         float pDelta = Math.abs(MathHelper.wrapDegrees(wantPitch - startPitch));
         float maxY = pDelta == 0 ? maxStep : Math.min(maxStep, maxStep * yDelta / pDelta);

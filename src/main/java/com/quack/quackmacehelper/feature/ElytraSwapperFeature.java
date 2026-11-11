@@ -74,7 +74,7 @@ public class ElytraSwapperFeature {
 
         // Must be gliding while the sequence is being prepared. Once FIGHT
         // starts we keep going until a stop condition fires (landing etc.).
-        if (!player.isFallFlying() && (phase == Phase.AIM || phase == Phase.WAIT)) {
+        if (!player.isGliding() && (phase == Phase.AIM || phase == Phase.WAIT)) {
             finish(client);
             return;
         }
@@ -91,7 +91,7 @@ public class ElytraSwapperFeature {
             if (vy > 0 && t.getY() >= player.getY()) return;
 
             target = t;
-            prevSlot = player.getInventory().selectedSlot;
+            prevSlot = player.getInventory().getSelectedSlot();
             didAxePhase = false;
             axeHitsLeft = 0;
             // 3–4 CPS, randomized once per sequence
@@ -245,9 +245,10 @@ public class ElytraSwapperFeature {
     private static void swapElytraBackOn(MinecraftClient client, ClientPlayerEntity player) {
         int elytraSlot = InventoryHelper.findElytraInHotbar(player);
         if (elytraSlot == -1) return;
-        // Only makes sense if the chest slot currently holds a chestplate
-        // (ElytraItem is NOT an ArmorItem, so an elytra already on passes).
-        if (!(player.getEquippedStack(EquipmentSlot.CHEST).getItem() instanceof ArmorItem)) return;
+        // Only makes sense if the chest slot currently holds a real chestplate
+        // (1.21.11: no ArmorItem class — compare against the elytra directly).
+        ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
+        if (chest.isEmpty() || chest.getItem() == Items.ELYTRA) return;
         client.interactionManager.clickSlot(
             player.currentScreenHandler.syncId,
             CHEST_ARMOR_SCREEN_SLOT,
@@ -305,7 +306,8 @@ public class ElytraSwapperFeature {
     /** Best chestplate in the hotbar — tier-ordered, not first-found. */
     private static final Item[] CHESTPLATE_TIERS = {
         Items.NETHERITE_CHESTPLATE, Items.DIAMOND_CHESTPLATE, Items.IRON_CHESTPLATE,
-        Items.GOLDEN_CHESTPLATE, Items.CHAINMAIL_CHESTPLATE, Items.LEATHER_CHESTPLATE
+        Items.COPPER_CHESTPLATE, Items.GOLDEN_CHESTPLATE,
+        Items.CHAINMAIL_CHESTPLATE, Items.LEATHER_CHESTPLATE
     };
 
     private static int findChestplateHotbarSlot(ClientPlayerEntity player) {

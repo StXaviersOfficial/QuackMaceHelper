@@ -116,7 +116,7 @@ public class PearlCatchFeature {
         if (!manual) {
             AimAssistFeature.snapAimAt(client, intercept);
         }
-        int prevSlot = player.getInventory().selectedSlot;
+        int prevSlot = player.getInventory().getSelectedSlot();
         InventoryHelper.switchToSlot(client, wcSlot);
         client.interactionManager.interactItem(player, Hand.MAIN_HAND);
         InventoryHelper.switchToSlot(client, prevSlot);

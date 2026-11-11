@@ -1,5 +1,5 @@
 plugins {
-        id 'fabric-loom' version '1.7.4'
+        id 'net.fabricmc.fabric-loom-remap' version '1.19-SNAPSHOT'
         id 'maven-publish'
 }
 
@@ -11,6 +11,7 @@ base {
 }
 
 repositories {
+        mavenCentral()
         maven { url "https://maven.shedaniel.me/" }
         maven { url "https://maven.terraformersmc.com/releases/" }
 }
@@ -56,6 +57,6 @@ java {
 
 jar {
         from("LICENSE") {
-                rename { "${it}_${project.archivesBaseName}" }
+                rename { "${it}_${project.archives_base_name}" }
         }
 }

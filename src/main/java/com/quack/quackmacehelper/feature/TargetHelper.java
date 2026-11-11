@@ -56,7 +56,7 @@ public class TargetHelper {
     public static double angleToEntity(MinecraftClient client, LivingEntity entity) {
         if (client.player == null) return Double.MAX_VALUE;
         Vec3d look = client.player.getRotationVec(1.0f);
-        Vec3d toEntity = entity.getPos().subtract(client.player.getEyePos()).normalize();
+        Vec3d toEntity = entity.getEntityPos().subtract(client.player.getEyePos()).normalize();
         double dot = Math.max(-1.0, Math.min(1.0, look.dotProduct(toEntity)));
         return Math.toDegrees(Math.acos(dot));
     }
