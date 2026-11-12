@@ -1,5 +1,5 @@
 ================================================================================
-MASTER PROMPT - BUILD "QUACKMACEHELPER" FROM SCRATCH
+MASTER PROMPT - BUILD "QUACKMACEHELPER" FROM SCRATCH (rev 2, 2026-11-12)
 Paste this entire file into any capable AI. It contains everything needed to
 build the complete mod from zero. No other context is required.
 ================================================================================
@@ -22,17 +22,22 @@ ABSOLUTE RULES (violating any of these makes the build unacceptable)
    path for equipping/throwing, the real shield-use path. NEVER construct or
    send raw packets yourself, never bypass the interaction manager, never
    inject fake inventory clicks outside the vanilla flow. The server must
-   only ever observe input a legitimate player client could produce.
+   only ever observe input a legitimate player client could produce. (Note:
+   issuing several real attack calls within one tick is fine - each one is a
+   genuine client action.)
 2. PLAYER-POSITION MEASUREMENTS. Every distance, height difference and angle
    is measured from PLAYER positions (eye/feet), never from the ground
    beneath them. "3 blocks above the target" always means: attacker's body
    height minus target's body height >= 3 blocks.
 3. MASTER KILL SWITCH. The very first setting in General is a master on/off
    toggle. When off, the mod must be completely inert - no feature code runs,
-   no event handlers act, no HUD renders, no keybinds respond - as if the mod
-   was never installed. When on, only features whose own toggles are on run.
+   no event handlers act, no HUD renders, no feature keybinds respond - as if
+   the mod was never installed. ONLY the mod-menu open key and the ModMenu
+   integration entry keep working, so the mod can always be re-enabled
+   in-game. When on, only features whose own toggles are on run.
 4. HOTBAR REQUIREMENTS. A feature only ever activates if its required items
-   are present in the hotbar (details per feature below).
+   are present (details per feature below; Always-On Shield may also use the
+   offhand).
 5. NO FEATURE COLLISIONS. Where two features could react to the same moment,
    the collision rules below decide who wins. Nothing may flicker slots,
    double-swap, or fight for the aim state.
@@ -52,13 +57,14 @@ AIM ASSIST
   - On/off switch
   - Toggle keybind (unbound)
   - Range: 0.1 to 8 blocks
-  - FOV: cone measured from the crosshair
+  - FOV: cone measured from the crosshair, 1 to 360 degrees, default 360
   - Speed in degrees/second (default 3600)
   - Speed randomization: ON by default. Each time the aim assist ACTIVATES,
     roll one random value in [0, 200] and either add it to or subtract it
-    from the speed; hold that adjusted speed for the whole activation.
+    from the speed; hold that adjusted speed for the whole activation. Clamp
+    the result to a floor of 10 deg/s so it can never reach zero or below.
   - Mode: "Smooth" (default) or "Max".
-  - Aim At: Head / Center / Feet.
+  - Aim At: Head / Center / Feet / Auto.
 ATTRIBUTESWAP
   - On/off switch, toggle keybind (unbound)
 STUN SLAM
@@ -69,18 +75,24 @@ PEARL CATCH
   - Delay: 1-3 ticks
 SHIELD DRAINING
   - On/off switch, toggle keybind (unbound)
-  - CPS: 20 to 250
+  - CPS: 20 to 250, default 50
 ALWAYS-ON SHIELD
   - On/off switch, toggle keybind (unbound)
 ELYTRA MACE
   - On/off switch, toggle keybind (unbound)
   - Aim type: Smooth / Instant
   - AutoAim: on/off
-  - FOV: 60 to 360 degrees
-AUTO MACE
-  - On/off switch, keybind (selectable/unbound)
+  - FOV: 60 to 360 degrees, default 360
+AUTO MAZE
+  - On/off switch, toggle keybind (unbound)
   - Auto aim: on/off
   - Aim type: Smooth / Instant
+  - FOV: 60 to 360 degrees, default 360
+AUTO MACE
+  - On/off switch, toggle keybind (unbound)
+  - Auto aim: on/off
+  - Aim type: Smooth / Instant
+  - FOV: 60 to 360 degrees, default 360
 WIND TACKLE
   - A dead "coming soon" button at the very bottom. It does nothing.
 
@@ -102,8 +114,13 @@ AIM ASSIST
   Max mode: snap the crosshair onto the aim point instantly every tick. No
   smoothing, jitter is fine.
   Aim points (Wurst-exact): Head = target eye height; Center = bounding box
-  center; Feet = position + 0.001.
-  Speed randomization semantics: one roll per activation (see menu layout).
+  center; Feet = position + 0.001; Auto = closest point of the target's
+  hitbox to the player's eyes (eye position clamped onto the box).
+  "Activation" for speed randomization = the moment the assist engages a
+  target (no target -> target). Switching to a different target, or
+  re-engaging after the target was lost, is a NEW activation with a NEW
+  random roll. The rolled speed is held for the whole activation - never
+  re-rolled per tick.
 
 ATTRIBUTESWAP
   Trigger: the player lands a hit while holding a SWORD, an AXE, a SPEAR
@@ -140,13 +157,15 @@ STUN SLAM
   Stun Slam must NOT run - Shield Draining takes over completely.
 
 PEARL CATCH
-  Watch for a thrown ender pearl whose arc will rise more than 10 blocks
-  (heights measured from player positions, not the ground).
+  Watch for THE PLAYER'S OWN ender pearl being thrown (check the pearl's
+  owner; pearls from enemies or teammates are ignored) whose arc will rise
+  more than 10 blocks (heights measured from player positions, not the
+  ground).
   Automatic mode: simulate both trajectories precisely; solve where a wind
   charge thrown after the configured delay (1-3 ticks) will meet the pearl;
   instantly snap the camera onto the throw direction (no smoothing) and
   throw the wind charge at exactly the right tick so it collides with the
-  pearl mid-air.
+  pearl mid-air. One wind-charge throw per pearl; no retry on a miss.
   Manual mode: when a qualifying pearl is detected, just throw the wind
   charge after the configured delay - no camera movement, no math.
   Requires a wind charge in the hotbar.
@@ -155,30 +174,38 @@ SHIELD DRAINING
   Conditions: player 3+ blocks above the target, target's shield raised,
   target within attack range, a mace in the hotbar.
   Behavior: without waiting for any click from the player, auto-spam the
-  best-damage mace at the configured CPS (20-250), starting the moment the
-  target enters range (1-2 ticks early if possible) and continuing while the
-  shield stays up. Rationale: every blocked hit of 3+ HP costs the shield
+  best-damage mace at the configured CPS (20-250, default 50), starting the
+  SAME TICK the target enters attack range (a real client cannot attack out
+  of range, so there is no "early" start) and continuing while the shield
+  stays up. Rationale: every blocked hit of 3+ HP costs the shield
   durability equal to the attack damage - high-CPS falling mace hits shred
   a 336-durability shield near-instantly.
-  While this is active, Stun Slam's axe phase is suppressed (no axe hit at
-  all - the shield staying up is the point).
+  While this is active, it owns ALL attack output against that shielded
+  target: Stun Slam's axe phase is suppressed, and Auto Maze's / Auto Mace's
+  attack phases are suppressed too (they only provide aim). No axe hits
+  while draining - the shield staying up is the point.
 
 ALWAYS-ON SHIELD (anti elytra-macer defense)
   Continuously scan a hemisphere 8 blocks wide centered at the player's
   level for players who are falling or gliding 3+ blocks above the player
   (relative heights; works while you are in the air too).
   When one is found: instantly snap-lock the aim onto them, raise and hold
-  the shield while looking at them. Keep holding until the threat descends
-  to about 2 blocks above your level (the mace smash stops being possible
-  below 1.5 blocks of height advantage), then release and resume.
+  the shield while looking at them (a REAL use-key hold, no packets). Keep
+  holding until the threat descends to 2 blocks above your level (the mace
+  smash stops being possible below 1.5 blocks of height advantage), then
+  release and resume scanning.
+  If the player attacks while the shield is held: drop the shield for that
+  swing and re-raise it while the threat persists.
+  Requires a shield in the hotbar or the offhand.
 
 ELYTRA MACE (the flagship)
   Requires: the player is gliding with an elytra (firework boost optional),
-  and both an elytra and a chestplate are in the hotbar.
+  and both an elytra and a chestplate are in the hotbar. While gliding, Auto
+  Maze and Auto Mace stay idle - they are falling-state features.
   With AutoAim ON: while gliding, scan the hemisphere BELOW the player
-  inside the configured FOV (60-360). When a player is detected, run the aim
-  assist using this feature's own aim type (Smooth or Instant). The moment
-  the target sits on the crosshair:
+  inside the configured FOV (60-360, default 360). When a player is
+  detected, run the aim assist using this feature's own aim type (Smooth or
+  Instant). The moment the target sits on the crosshair:
     1) swap the equipped elytra for the chestplate by selecting the
        chestplate's hotbar slot and using it (right-click) - a REAL
        equipment swap, no packets;
@@ -189,18 +216,64 @@ ELYTRA MACE (the flagship)
     3) if no shield: skip the axe, go straight to the best mace spam.
   With AutoAim OFF: no scanning; while gliding 3+ blocks above a target,
   wait until the target crosses the crosshair, then run the same sequence.
+  The aim is released after each engagement; the feature stays enabled and
+  re-arms for the next target.
 
-AUTO MACE (falling attack automation)
+AUTO MAZE (falling-attack automation, "Elite Maze" style but not a copy)
   Triggers only while the player is FALLING (not gliding, not grounded) from
-  3+ blocks. Build a hemisphere below the player and look for a target
-  inside the configured FOV. If auto aim is on, engage the selected aim type
-  (smooth or instant). When the target is on the cursor, attack - no
-  chestplate swap is needed while plain falling. If the target's shield is
-  up: axe spam first, then best-mace spam. If not: direct mace spam a few
-  times until the smash bonus stops applying.
+  3+ blocks above a target. Build a hemisphere below the player and look for
+  a target inside the configured FOV (60-360, default 360). If auto aim is
+  on, engage the selected aim type (smooth or instant). When the target is
+  on the cursor, attack - no chestplate swap is needed while plain falling.
+  If the target's shield is up: axe spam first, then best-damage mace spam.
+  If not: direct mace spam, KEPT UP until the smash bonus stops applying.
+  Release the aim when the engagement ends; the feature stays enabled.
+  Requires a mace in the hotbar (plus an axe for the shield path).
+
+AUTO MACE (Elytra Mace's attack sequence without the elytra part)
+  Triggers only while the player is FALLING (not gliding) from 3+ blocks
+  above a target - you are already falling, so the smash already counts and
+  NO elytra/chestplate swap happens.
+  With auto aim on: scan the hemisphere below the player inside the
+  configured FOV (60-360, default 360) and engage the selected aim type
+  (Smooth or Instant). With auto aim off: wait until the target crosses the
+  crosshair.
+  The moment the target is on the crosshair, run Elytra Mace's exact burst:
+    - shield up: axe 5-6 hits within 1 tick, then best-damage mace 5-6 hits
+      within the next 2 ticks, then release the aim - engagement done;
+    - shield down: best-damage mace directly, same 5-6-hit burst, then
+      release.
+  ONE precise burst per engagement - unlike Auto Maze, it does NOT keep
+  spamming until the smash bonus ends. Release the aim when done; the
+  feature stays enabled.
+  Requires a mace in the hotbar (plus an axe for the shield path).
 
 WIND TACKLE
   Implement NOTHING. Only a dead "coming soon" menu entry.
+
+--------------------------------------------------------------------------------
+COLLISION RULES (who wins when two features could react to the same moment)
+--------------------------------------------------------------------------------
+1. Master kill switch off -> everything is inert except the mod menu itself.
+2. Gliding state -> only Elytra Mace may engage; Auto Maze and Auto Mace
+   are falling-state features and stay idle.
+3. Falling state with BOTH Auto Maze and Auto Mace enabled -> Auto Mace
+   takes priority; Auto Maze stands down completely for that engagement.
+4. Target's shield up + Shield Draining enabled -> Shield Draining owns ALL
+   attack output at its CPS: Stun Slam's axe phase is suppressed, Auto
+   Maze's and Auto Mace's attack phases are suppressed; whichever feature
+   is engaging provides the aim only. No axe hits while draining.
+5. A feature running its own aim (Elytra Mace, Auto Maze, Auto Mace,
+   Always-On Shield, Pearl Catch's snap) suspends the global Aim Assist
+   until it releases the aim state, and every feature MUST release it when
+   done - nothing may leave the aim state stuck.
+6. Attribute Swap and Stun Slam reacting to the same hit: Attribute Swap
+   owns the same-tick swap chain; Stun Slam queues behind it - one swap
+   chain, no slot flicker.
+7. Pearl Catch's instant snap fires immediately even if a combat aim is
+   active; the combat aim re-engages right after the throw.
+8. Always-On Shield drops the shield for the player's own attack swing and
+   re-raises it while the threat persists.
 
 --------------------------------------------------------------------------------
 VERIFIED 1.21.11 MECHANICS (use these; do not re-guess them)
@@ -231,9 +304,11 @@ QUALITY BAR (the final audit - do this before delivering)
 2. Grep the codebase for any raw packet usage (PlayerInteractC2SPacket,
    ClickSlotC2SPacket, UpdateSelectedSlotC2SPacket, custom sendPacket calls)
    - there must be NONE outside the vanilla interaction manager paths.
-3. Verify the master kill switch disables everything.
-4. Verify every feature checks its hotbar requirement before acting.
+3. Verify the master kill switch disables every feature while the mod menu
+   itself stays reachable.
+4. Verify every feature checks its hotbar/offhand requirement before acting.
 5. Verify every height/distance check uses player positions.
-6. Verify the collision rules (Shield Draining suppresses Stun Slam).
+6. Verify all eight collision rules, including the gliding/falling split and
+   Auto Mace's priority over Auto Maze.
 7. Build green on CI for Fabric 1.21.11 (Yarn 1.21.11+build.6), deliver the
    jar, then verify in-game behavior feature by feature.
