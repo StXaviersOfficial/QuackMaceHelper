@@ -1,0 +1,339 @@
+================================================================================
+QUACKMACEHELPER - V5 ROADMAP & CHECKPOINT (expanded from the boss's dictation)
+Date: 2026-11-12 | Target: Fabric 1.21.11 (client-side) | Goal: ready to publish
+       on Modrinth / CurseForge after maximum polish.
+================================================================================
+
+VOICE-TYPO NORMALIZATION (so nothing gets misunderstood):
+  "Worst client"        = Wurst client (aim assist reference)
+  "First client"        = Wurst client (AimAt "Auto" reference)
+  "auto maze"           = AutoMace (falling-attack automation feature)
+  "Elite Maze"          = reference mace mod, exact name pending confirmation
+  "stone slamming"      = StunSlam
+  "X"                   = axe (the item)
+  "zinc"                = Zink renderer (Mojo/MJ Launcher)
+  "Billiard"            = name the boss uses for the falling-attack feature
+                         (no "Billiard" exists in code today - see Q1)
+
+================================================================================
+SECTION 0 - GLOBAL RULES (apply to EVERY feature, no exceptions)
+================================================================================
+R1. MASTER KILL SWITCH: first setting of General. When OFF the mod must behave
+    as if it never existed: no feature ticks, no mixins act, no HUD, no
+    keybinds respond. When ON, only features whose own toggles are ON run.
+R2. REAL PLAYER ACTIONS ONLY (STRICT): every action must go through the real
+    client code paths - real selected-slot changes, real attack calls
+    (ClientPlayerInteractionManager.attackEntity), real item use, real shield
+    use. NEVER handcraft/spam raw packets. The server must only ever see what
+    a legit player client would send.
+R3. PLAYER-POSITION MEASUREMENTS (STRICT): all distances, heights and angles
+    are measured from PLAYER positions (eye / feet), never from the ground
+    under them. "Falling from above 3 blocks" = the ATTACKER'S height minus
+    the TARGET'S height (both as body positions) >= 3 blocks, not the fall
+    distance counter, unless a feature explicitly says fall distance.
+R4. HOTBAR REQUIREMENTS: a feature only activates if its required items are in
+    the hotbar (any slot):
+      - PearlCatch ........ wind charge
+      - ElytraMace ........ elytra AND chestplate
+      - StunSlam .......... axe
+      - AttributeSwap ..... mace (breach mace for the normal path)
+      - AutoMace .......... mace (best-damage one is chosen)
+R5. NO COLLISIONS: features must not fight each other (see collision matrix).
+R6. Every toggle, keybind and selector must actually work; verify each one.
+R7. All keybinds default UNBOUND except the open-menu key.
+R8. All mechanics researched and verified on Minecraft 1.21.11 specifically.
+
+================================================================================
+SECTION 1 - MENU STRUCTURE (exact top-to-bottom order)
+================================================================================
+GENERAL
+  1. MASTER KILL SWITCH (on/off)                 [NEW in V5]
+  2. Target players / mobs / animals             (existing, unchanged)
+  3. Open menu key                               (existing, unchanged)
+
+AIM ASSIST
+  - On/off switch
+  - Toggle keybind (unbound by default)
+  - Range selector: 0.1 - 8 blocks
+  - FOV selector (cone from the crosshair/center aim point)
+  - Speed (degrees per second; 3600 default)
+  - Speed randomization (ON by default): when the assist ACTIVATES, pick a
+    random value up to 200 and add OR subtract it from the speed (once per
+    activation)
+  - Mode: Smooth (default) | Max
+      Smooth = Wurst-style smooth rotation (algorithm in Section 3)
+      Max    = instant snap-lock onto the aim point every tick; jitter is
+               acceptable, no smoothing at all
+  - Aim At: Head | Center | Feet  (Wurst definitions, Section 3)
+
+ATTRIBUTESWAP (replaces the old "BreachSwap")
+  - On/off switch, toggle keybind (unbound)
+  - TRIGGER ITEMS: sword (any material), axe, spear WITHOUT Lunge enchantment,
+    or EMPTY HAND - nothing else triggers it (a spear WITH Lunge never
+    triggers; bows/crossbows/tridents/etc never trigger).
+  - NORMAL CASE (user on ground / jumping / falling less than 3 blocks above
+    target, OR target is HIGHER than user): the SAME TICK the user's hit lands
+    with a trigger item -> switch to the mace with BREACH (I-IV) -> use the
+    real attack the SAME tick -> switch back to the original item within the
+    next 1-4 ticks (randomized).
+  - FALLING CASE (user 3+ blocks ABOVE the target, see R3): calculate which
+    mace in the hotbar deals the MOST damage (fall distance + Density /
+    Breach levels + base damage; math in Section 3) - calculation must run in
+    milliseconds - then same-tick swap -> hit -> swap back within 1-4 ticks.
+  - If target is higher than user: always the plain breach-mace path (Density
+    and Wind Burst do nothing from below).
+
+STUN SLAM ("stone slamming")
+  - On/off switch, toggle keybind (unbound)
+  - Constantly watches the player currently UNDER THE CROSSHAIR for a raised
+    shield. No shield -> feature does nothing at all.
+  - Shield UP, user on ground / jumping / falling < 3 blocks above target,
+    user attacks: same tick switch to axe -> axe hit lands same tick OR next
+    tick (randomly 0 or 1 tick delay) -> switch back to the held item.
+  - Shield UP, user falling 3+ blocks above target, user attacks:
+    same tick switch to axe -> 4-5 axe hits inside the next 0-1 ticks ->
+    switch to the best-damage mace (calculated) -> 5-6 mace hits inside the
+    next 2-3 ticks (spam) -> next tick switch back to the original item.
+  - COLLISION RULE: if ShieldDraining is enabled AND the target's shield is
+    up, StunSlam must NOT run its axe phase at all - ShieldDraining takes
+    over (mace spam only, at its CPS). Applies to both height cases.
+
+PEARL CATCH
+  - On/off switch, toggle keybind (unbound)
+  - Mode: Automatic (default) | Manual
+  - Delay selector: 1-3 ticks
+  - Trigger: an ender pearl is thrown whose trajectory will exceed 10 blocks
+    of height (measured from PLAYER positions, R3).
+  - AUTOMATIC mode: predict exactly where the pearl will be when a wind
+    charge thrown NOW (after the selected delay) would reach it - full
+    projectile simulation, super precise - then INSTANTLY snap the camera to
+    the throw solution (no smooth movement) and throw the wind charge at the
+    selected delay. The wind charge must collide with the pearl mid-air.
+  - MANUAL mode: when a qualifying pearl is detected, just throw the wind
+    charge at the selected delay - no camera movement, no intercept math.
+  - Requires wind charge in hotbar (R4).
+
+SHIELD DRAINING
+  - On/off switch, toggle keybind (unbound)
+  - CPS selector: minimum 20, maximum 250
+  - Conditions: user 3+ blocks above the target (R3) AND target's shield is
+    raised AND target in attack range AND a mace is in the hotbar.
+  - Behavior: WITHOUT the user clicking anything, auto-spam the best-damage
+    mace (calculated) at the selected CPS, starting the moment the target
+    enters range (1-2 ticks earlier if possible). Works because every blocked
+    hit drains shield durability equal to the attack damage (Section 3).
+  - While active it disables StunSlam's above-3-block axe phase (collision
+    rule above): no axe hit, mace spam only, only while the shield is up.
+
+ALWAYS-ON SHIELD (anti elytra-macer defense)
+  - On/off switch, toggle keybind (unbound)
+  - Constantly scans a hemisphere 8 blocks wide around the user's level for
+    players who are falling from 3+ blocks above the user OR gliding 3+
+    blocks above the user (R3, relative heights; also works while the user is
+    in the air).
+  - On detection: instant snap-aim (lock) at the threat, hold the shield up
+    while looking at them, keep holding while they fall.
+  - Release when the threat descends to user level +1/+2 blocks (the exact
+    cutoff is being wired to the verified mace threshold, see Section 3/Q6).
+
+ELYTRA MACE (replaces the old "ElytraSwapper") - MOST IMPORTANT FEATURE
+  - On/off switch, toggle keybind (unbound)
+  - AimAssist type selector: Smooth | Instant
+  - AutoAim: on/off
+  - FOV selector: 60 - 360 degrees
+  - ACTIVATION REQUIRES the user gliding with an elytra (firework boost
+    optional).
+  - AUTOAIM ON: while gliding, scan a hemisphere BELOW the user inside the
+    selected FOV; when a player is detected, engage the aim assist with the
+    selected type (smooth or instant). Once the target is ON the crosshair:
+      1) swap elytra -> chestplate by selecting the chestplate's HOTBAR slot
+         and right-clicking it (real equipment swap - NOT packets);
+      2) IF the target's shield is up: switch to the axe slot, hit with the
+         axe 5-6 times within 1 tick, then switch to the best-damage mace
+         (calculated) and spam it 5-6 times within the next 2 ticks, then the
+         function ends and this aim assist turns off;
+      3) IF no shield: go straight to the mace (same spam pattern).
+  - AUTOAIM OFF: no hemisphere scan; instead, while gliding 3+ blocks above a
+    target (R3), wait until the target crosses the crosshair, then run the
+    same swap/attack sequence (elytra->chestplate, shield check, axe/mace).
+  - Requires elytra AND chestplate in hotbar (R4).
+
+AUTO MACE (rework of what the boss calls "Billiard"; behaves like the mod the
+boss calls "Elite Maze" - see Q1/Q2 - but must NOT be an exact copy)
+  - On/off switch, keybind (selectable / unbound)
+  - Auto aim: on/off
+  - Aim type: Smooth | Instant
+  - Behavior:
+    1) user is FALLING (not gliding) from 3+ blocks above ground/target (R3);
+    2) create a hemisphere BELOW the player and check for a target inside the
+       selected FOV;
+    3) if auto aim is on, engage the selected aim type;
+    4) when the target is on the cursor, perform the attack. No chestplate
+       swap needed here - the smash bonus already counts while falling;
+    5) target shield up  -> axe spam, then best-damage mace spam;
+    6) target shield down-> direct mace spam a few times, until the smash
+       bonus stops counting.
+
+WIND TACKLE
+  - Current WindChargeTackle code is DELETED. The bottom-most menu entry is a
+    dead "WindTackle - coming soon" button that does nothing.
+
+================================================================================
+SECTION 2 - COLLISION MATRIX
+================================================================================
+- Master kill switch OFF                    -> everything dead, period.
+- ShieldDraining ON + target shielded       -> StunSlam suppressed (no axe
+                                               phase); mace spam at CPS only.
+- ShieldDraining OFF (or target unshielded) -> StunSlam behaves normally.
+- ElytraMace & AutoMace own their aim state -> release/clean it when done so
+                                               the global AimAssist is never
+                                               left stuck.
+- AttributeSwap and StunSlam both fire on the same hit -> AttributeSwap owns
+  the same-tick swap; StunSlam must queue behind it (single swap chain, no
+  slot flicker conflicts).
+
+================================================================================
+SECTION 3 - VERIFIED MECHANICS RESEARCH (Minecraft 1.21.11)
+================================================================================
+MACE (minecraft.wiki/w/Mace):
+  - Smash attack: attacker must have fallen >= 1.5 blocks and not be
+    grounded/elytra-flying at the hit. Extra damage: +4 HP per block for the
+    first 3 blocks fallen, +2 HP per block for the next 5, +1 HP per block
+    after that. Usually also a critical hit (+50%).
+  - Successful smash resets fall height -> no fall damage taken.
+  - Attack range 3 blocks. Base damage 6 (smash stacks on top).
+  - Density (I-V): +0.5 damage per block fallen per level. Smash-only.
+  - Breach (I-IV): target armor effectiveness -15% per level.
+  - Density and Breach are MUTUALLY EXCLUSIVE on one mace -> the
+    best-damage calculator must evaluate each mace with its own enchants.
+  - Wind Burst (I-III): launches the attacker upward after a smash (~7-8
+    blocks per level) - enables chained smashes; does not negate fall damage.
+SHIELD (minecraft.wiki/w/Shield):
+  - Durability 336. A blocked attack of 3+ HP costs the shield durability
+    equal to the attack's damage (rounded up) -> THIS is why ShieldDraining
+    works: 50+ CPS of falling mace hits (huge per-hit damage) shreds 336
+    durability near-instantly.
+  - An axe hit on a fully-raised shield disables that shield for 5 seconds
+    (100 ticks) -> this is the StunSlam axe phase's purpose.
+  - Shield must be fully up (past its 5-tick raise delay) to be disabled.
+SPEAR + LUNGE (1.21.11 "Mounts of Mayhem" content, confirmed):
+  - Spears exist; Lunge (I-III) propels the wielder forward on a jab, costs
+    saturation. -> AttributeSwap triggers on spears WITHOUT Lunge only.
+WIND CHARGE + PEARL (confirmed tech, MC-268407 + "ender catch" community tech):
+  - Wind charges collide with ender pearls mid-air and knock them off course
+    -> PearlCatch's intercept is physically possible.
+WURST AIM ASSIST (read from Wurst7 source, GPL-3):
+  - Per-tick rotation budget = speed_deg_per_sec / 20.
+  - slowlyTurnTowards(): split the budget between yaw and pitch in proportion
+    to how far each still has to go (yawChange vs pitchChange ratio), clamp
+    each axis to its share (limitAngleChange, wrap-degree aware).
+  - The assist ADDS its delta on top of the player's real mouse input (mouse
+    pipeline injection) so rotations look completely natural - this is the
+    smoothness we want in Smooth mode.
+  - If less than 1 degree off but not on the hitbox, exaggerate by 1 degree
+    to actually land on it.
+  - FOV check = angle between current look and the needed rotation <= FOV/2.
+  - Aim points: Head = eye height; Center = bounding box center;
+    Feet = position + 0.001; Auto = closest point of the hitbox to the
+    player's eyes (clamped eye position onto the box).
+
+================================================================================
+SECTION 4 - EXISTING 4.1.1 BASELINE (what gets reworked vs kept)
+================================================================================
+Kept as-is: target selection (players/mobs/animals), open-menu key, HUD,
+ModMenu integration, config persistence, RandomAim (anti-pattern micro-jitter
+used by the aim system).
+Reworked: AimAssist (defaults, randomization semantics, mode switch),
+BreachSwap -> AttributeSwap, StunSlam (aimed-player shield check + spam
+timings + collision), PearlCatch (auto/manual + snap-look + delay),
+ShieldDraining (CPS 20-250 + auto-fire + collision), AlwaysOnShield (8-block
+hemisphere + snap aim + release height), ElytraSwapper -> ElytraMace (full
+attack sequence), keybinds (all unbound by default).
+New: master kill switch, AutoMace, WindTackle "coming soon" stub.
+Deleted: WindChargeTackle feature + its config + keybind.
+Useful reference: upstream BetterMaceSwap 5.0.0-1.21.11 (same mod lineage)
+already implements AttributeSwapMode/LungeSwap/StunSlamMode vocabulary and a
+pearl position simulator - mine it for physics and timing patterns.
+
+================================================================================
+SECTION 5 - CHECKPOINT / TODO (mark off as completed)
+================================================================================
+[x] Logo reverted to the ORIGINAL icon (the 1KB "mace thing" from the V4.1
+    fix pass is gone; original 2.3MB icon restored on both branches,
+    CI rebuilt the jar green 2026-11-12, release asset updated)
+[x] Research: Wurst aim assist algorithm + AimAt semantics (from source)
+[x] Research: mace smash / Density / Breach / Wind Burst (wiki, 1.21.11)
+[x] Research: shield durability drain + axe disable (wiki)
+[x] Research: spear + Lunge existence in 1.21.11
+[x] Research: wind charge vs ender pearl mid-air collision
+[x] Zink crash root-caused at source level (GameActivity.java:240 =
+    requireNonNull(getExtras()) NPE after renderer crash; primary suspect
+    Zink-on-Mali-G68; fix planned in the MojoLauncher fork)
+[x] MojoLauncher v3 forked (StXaviersOfficial/MojoLauncher) for the launcher
+    patches (Zink guard + virtual mouse sensitivity decoupling)
+[x] Roadmap checkpoint file (this file) + master prompt file created
+[ ] V5 branch created; config schema extended (kill switch, new options,
+    CPS bounds 20-250, unbound keybinds)
+[ ] Master kill switch implemented + verified (mod fully inert when off)
+[ ] AimAssist rework (Wurst math, speed 3600 default, randomization once per
+    activation, Smooth/Max modes, AimAt head/center/feet)
+[ ] AttributeSwap (trigger items incl. no-Lunge spears + empty hand, same
+    tick hit, 1-4 tick randomized swap-back, best-mace calculator)
+[ ] StunSlam (crosshair-target shield watch, 0-1 tick axe delay, >3 block
+    spam pattern 4-5 axe / 5-6 mace in 2-3 ticks, swap-back next tick)
+[ ] PearlCatch (10-block trigger from player heights, projectile intercept
+    sim, instant snap-look, 1-3 tick delay, auto/manual modes)
+[ ] ShieldDraining (auto-fire without clicks at 20-250 CPS, best mace,
+    starts on range entry, StunSlam suppression)
+[ ] AlwaysOnShield (8-block hemisphere at user level, snap lock, shield hold,
+    release at cutoff height)
+[ ] ElytraMace (gliding requirement, hemisphere below within FOV 60-360,
+    smooth/instant aim, elytra->chestplate real swap, axe+mace spam sequence,
+    autoaim on/off paths)
+[ ] AutoMace (falling not gliding, hemisphere below, aim options, attack
+    sequence with shield branch)
+[ ] WindChargeTackle deleted; "coming soon" dead button added
+[ ] Real-actions audit: zero raw packet sends anywhere (R2)
+[ ] Player-position measurement audit across all features (R3)
+[ ] Collision matrix verified live (R5, Section 2)
+[ ] Full code re-read vs this spec; fix every mismatch; repeat until clean
+[ ] CI green on the V5 branch; jar delivered to the phone; in-game verified
+
+================================================================================
+SECTION 6 - OPEN QUESTIONS FOR THE BOSS (answer via ntfy or chat)
+================================================================================
+Q1. "Billiard" - no feature with that name exists in the current mod. Which
+    existing feature did you mean, or is Billiard the NAME you want for the
+    new falling-attack feature? (Plan: call it "AutoMace" unless you object.)
+Q2. "Elite Maze" - which exact mod is that? No "EliteMace" exists on
+    Modrinth. Closest match: "Mace Utils" (auto mace + elytra mace, 1.21.5-
+    1.21.11). Confirm the name/link so I copy its FEEL without copying it.
+Q3. PearlCatch - should it react to ANY qualifying pearl (including enemies')
+    or only your own?
+Q4. AimAt - you listed three options (head/center/feet) but referenced "auto
+    mode". Add a 4th "Auto" option (Wurst-style: closest point on the
+    hitbox)? Recommended: yes.
+Q5. AimAssist defaults - speed 3600 deg/s as the DEFAULT, correct? (Wurst's
+    own default is 600; yours will be 3600 unless you say otherwise.)
+Q6. AlwaysOnShield release height - release when the attacker descends to
+    your level +2 (safe: mace needs 1.5+ blocks of height advantage)? Or +1?
+Q7. Speed randomization - confirm: one random roll (0-200, added or
+    subtracted) each time the assist ACTIVATES, held for that whole
+    activation - not re-rolled every tick?
+Q8. ShieldDraining default CPS inside the 20-250 range - 50?
+
+================================================================================
+SECTION 7 - SIDE TRACKS STATUS (for context)
+================================================================================
+- MJ Launcher (Mojo v3) virtual-mouse sensitivity bug: fork ready, patch
+  planned next (decouple PREF_MOUSESCALE from in-game look input, Pojav
+  behavior as reference).
+- Zink renderer: crashes on world load (line-240 NPE confirmed = secondary
+  crash after the native renderer died; Mali-G68 + Zink is the prime
+  suspect). Recommendation until patched: keep playing on Holy Gl4ses.
+- Phone bridge is OFFLINE since this morning (bridge loop died in Termux) -
+  restart it to restore remote control, ntfy pings and file delivery.
+- GitHub: old account (StXaviersOfficial) healthy, 36 repos, token verified;
+  new account still suspended. PAT readable by you at:
+  github.com/StXaviersOfficial/credentials-vault -> live-vault/github_token
+  (private repo, your own login; verified identical to the active token).

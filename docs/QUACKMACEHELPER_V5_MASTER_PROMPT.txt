@@ -1,0 +1,239 @@
+================================================================================
+MASTER PROMPT - BUILD "QUACKMACEHELPER" FROM SCRATCH
+Paste this entire file into any capable AI. It contains everything needed to
+build the complete mod from zero. No other context is required.
+================================================================================
+
+You are going to build a complete, production-quality Minecraft Fabric CLIENT
+mod called QuackMaceHelper (mod id: quackmacehelper) for Minecraft Java
+1.21.11, written in Java, using Fabric Loom, Yarn mappings
+(1.21.11+build.6), release target Java 21. It is a mace-PvP utility mod. The
+end goal is a polished, publishable mod (Modrinth/CurseForge quality bar).
+Work in small verified increments, test-build often, and when you finish you
+must re-read every line of code against this specification and fix every
+mismatch before delivering.
+
+--------------------------------------------------------------------------------
+ABSOLUTE RULES (violating any of these makes the build unacceptable)
+--------------------------------------------------------------------------------
+1. REAL PLAYER ACTIONS ONLY. Every action must go through the genuine client
+   code paths: change the selected hotbar slot for real, call the real attack
+   method (ClientPlayerInteractionManager.attackEntity), the real item-use
+   path for equipping/throwing, the real shield-use path. NEVER construct or
+   send raw packets yourself, never bypass the interaction manager, never
+   inject fake inventory clicks outside the vanilla flow. The server must
+   only ever observe input a legitimate player client could produce.
+2. PLAYER-POSITION MEASUREMENTS. Every distance, height difference and angle
+   is measured from PLAYER positions (eye/feet), never from the ground
+   beneath them. "3 blocks above the target" always means: attacker's body
+   height minus target's body height >= 3 blocks.
+3. MASTER KILL SWITCH. The very first setting in General is a master on/off
+   toggle. When off, the mod must be completely inert - no feature code runs,
+   no event handlers act, no HUD renders, no keybinds respond - as if the mod
+   was never installed. When on, only features whose own toggles are on run.
+4. HOTBAR REQUIREMENTS. A feature only ever activates if its required items
+   are present in the hotbar (details per feature below).
+5. NO FEATURE COLLISIONS. Where two features could react to the same moment,
+   the collision rules below decide who wins. Nothing may flicker slots,
+   double-swap, or fight for the aim state.
+6. All keybinds default to UNBOUND (except the mod-menu open key).
+7. Every toggle, keybind, slider and mode selector must genuinely work.
+8. Research and verify every Minecraft mechanic you rely on against version
+   1.21.11 specifically before coding it.
+
+--------------------------------------------------------------------------------
+MOD MENU LAYOUT (exact top-to-bottom order)
+--------------------------------------------------------------------------------
+GENERAL
+  - Master kill switch (on/off)                          [first setting!]
+  - Target players / target mobs / target animals (toggles)
+  - Open menu key
+AIM ASSIST
+  - On/off switch
+  - Toggle keybind (unbound)
+  - Range: 0.1 to 8 blocks
+  - FOV: cone measured from the crosshair
+  - Speed in degrees/second (default 3600)
+  - Speed randomization: ON by default. Each time the aim assist ACTIVATES,
+    roll one random value in [0, 200] and either add it to or subtract it
+    from the speed; hold that adjusted speed for the whole activation.
+  - Mode: "Smooth" (default) or "Max".
+  - Aim At: Head / Center / Feet.
+ATTRIBUTESWAP
+  - On/off switch, toggle keybind (unbound)
+STUN SLAM
+  - On/off switch, toggle keybind (unbound)
+PEARL CATCH
+  - On/off switch, toggle keybind (unbound)
+  - Mode: Automatic (default) / Manual
+  - Delay: 1-3 ticks
+SHIELD DRAINING
+  - On/off switch, toggle keybind (unbound)
+  - CPS: 20 to 250
+ALWAYS-ON SHIELD
+  - On/off switch, toggle keybind (unbound)
+ELYTRA MACE
+  - On/off switch, toggle keybind (unbound)
+  - Aim type: Smooth / Instant
+  - AutoAim: on/off
+  - FOV: 60 to 360 degrees
+AUTO MACE
+  - On/off switch, keybind (selectable/unbound)
+  - Auto aim: on/off
+  - Aim type: Smooth / Instant
+WIND TACKLE
+  - A dead "coming soon" button at the very bottom. It does nothing.
+
+--------------------------------------------------------------------------------
+FEATURE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+AIM ASSIST
+  Smooth mode must reproduce the Wurst client's AimAssist feel exactly:
+  - Per-tick rotation budget = speed/20 degrees.
+  - Split the budget between yaw and pitch proportionally to how much each
+    axis still has to turn; clamp each axis to its share; wrap-aware angles.
+  - Apply the rotation by adding the delta on top of the player's real mouse
+    input (through the mouse pipeline), so movement looks human.
+  - If under 1 degree away but not yet on the hitbox, exaggerate by 1 degree
+    so the crosshair actually lands on it.
+  - Target = nearest valid entity (honoring the target toggles) within range
+    whose angle from the crosshair is within FOV/2.
+  Max mode: snap the crosshair onto the aim point instantly every tick. No
+  smoothing, jitter is fine.
+  Aim points (Wurst-exact): Head = target eye height; Center = bounding box
+  center; Feet = position + 0.001.
+  Speed randomization semantics: one roll per activation (see menu layout).
+
+ATTRIBUTESWAP
+  Trigger: the player lands a hit while holding a SWORD, an AXE, a SPEAR
+  WITHOUT the Lunge enchantment, or an EMPTY HAND. Nothing else triggers it.
+  (Any material: netherite, diamond, iron, copper, wood, etc.)
+  Normal case (player grounded, jumping, or less than 3 blocks above the
+  target - or the target is HIGHER than the player): in the SAME TICK as the
+  triggering hit, switch to the mace enchanted with Breach (I-IV), attack
+  with it the SAME tick, then switch back to the originally held item within
+  the next 1-4 ticks (randomized).
+  Falling case (player 3+ blocks ABOVE the target): first compute, within
+  milliseconds, which mace in the hotbar deals the most damage for this hit
+  (evaluate each mace's own enchantments: Density adds 0.5 damage per block
+  fallen per level; Breach cuts target armor effectiveness 15% per level;
+  they never coexist on one mace; base smash bonus is +4 HP/block for the
+  first 3 blocks fallen, +2 HP/block for the next 5, +1 HP/block beyond).
+  Then same-tick swap to that best mace, hit the same tick, swap back within
+  1-4 randomized ticks.
+  Requires a qualifying mace in the hotbar or nothing happens.
+
+STUN SLAM
+  Constantly checks the player under the crosshair. If their shield is NOT
+  raised, do nothing. If it IS raised:
+  - Player on ground / jumping / under 3 blocks above target, and the player
+    attacks: same tick switch to an axe, land the axe hit same tick or next
+    tick (random 0-1 tick delay), switch back to the held item.
+  - Player 3+ blocks above target and attacks: same tick switch to axe, land
+    4-5 axe hits within the next 0-1 ticks, switch to the best-damage mace
+    (see AttributeSwap calculator), land 5-6 mace hits within the next 2-3
+    ticks, then next tick switch back to the original item.
+  Purpose: an axe hit on a raised shield disables that shield for 5 seconds.
+  Requires an axe (and for the falling case a mace) in the hotbar.
+  COLLISION: if Shield Draining is enabled and the target's shield is up,
+  Stun Slam must NOT run - Shield Draining takes over completely.
+
+PEARL CATCH
+  Watch for a thrown ender pearl whose arc will rise more than 10 blocks
+  (heights measured from player positions, not the ground).
+  Automatic mode: simulate both trajectories precisely; solve where a wind
+  charge thrown after the configured delay (1-3 ticks) will meet the pearl;
+  instantly snap the camera onto the throw direction (no smoothing) and
+  throw the wind charge at exactly the right tick so it collides with the
+  pearl mid-air.
+  Manual mode: when a qualifying pearl is detected, just throw the wind
+  charge after the configured delay - no camera movement, no math.
+  Requires a wind charge in the hotbar.
+
+SHIELD DRAINING
+  Conditions: player 3+ blocks above the target, target's shield raised,
+  target within attack range, a mace in the hotbar.
+  Behavior: without waiting for any click from the player, auto-spam the
+  best-damage mace at the configured CPS (20-250), starting the moment the
+  target enters range (1-2 ticks early if possible) and continuing while the
+  shield stays up. Rationale: every blocked hit of 3+ HP costs the shield
+  durability equal to the attack damage - high-CPS falling mace hits shred
+  a 336-durability shield near-instantly.
+  While this is active, Stun Slam's axe phase is suppressed (no axe hit at
+  all - the shield staying up is the point).
+
+ALWAYS-ON SHIELD (anti elytra-macer defense)
+  Continuously scan a hemisphere 8 blocks wide centered at the player's
+  level for players who are falling or gliding 3+ blocks above the player
+  (relative heights; works while you are in the air too).
+  When one is found: instantly snap-lock the aim onto them, raise and hold
+  the shield while looking at them. Keep holding until the threat descends
+  to about 2 blocks above your level (the mace smash stops being possible
+  below 1.5 blocks of height advantage), then release and resume.
+
+ELYTRA MACE (the flagship)
+  Requires: the player is gliding with an elytra (firework boost optional),
+  and both an elytra and a chestplate are in the hotbar.
+  With AutoAim ON: while gliding, scan the hemisphere BELOW the player
+  inside the configured FOV (60-360). When a player is detected, run the aim
+  assist using this feature's own aim type (Smooth or Instant). The moment
+  the target sits on the crosshair:
+    1) swap the equipped elytra for the chestplate by selecting the
+       chestplate's hotbar slot and using it (right-click) - a REAL
+       equipment swap, no packets;
+    2) if the target's shield is up: switch to the axe slot and hit 5-6
+       times within 1 tick, then switch to the best-damage mace and spam
+       5-6 hits within the next 2 ticks, then end (and release this
+       feature's aim);
+    3) if no shield: skip the axe, go straight to the best mace spam.
+  With AutoAim OFF: no scanning; while gliding 3+ blocks above a target,
+  wait until the target crosses the crosshair, then run the same sequence.
+
+AUTO MACE (falling attack automation)
+  Triggers only while the player is FALLING (not gliding, not grounded) from
+  3+ blocks. Build a hemisphere below the player and look for a target
+  inside the configured FOV. If auto aim is on, engage the selected aim type
+  (smooth or instant). When the target is on the cursor, attack - no
+  chestplate swap is needed while plain falling. If the target's shield is
+  up: axe spam first, then best-mace spam. If not: direct mace spam a few
+  times until the smash bonus stops applying.
+
+WIND TACKLE
+  Implement NOTHING. Only a dead "coming soon" menu entry.
+
+--------------------------------------------------------------------------------
+VERIFIED 1.21.11 MECHANICS (use these; do not re-guess them)
+--------------------------------------------------------------------------------
+- Mace smash attack: requires having fallen >= 1.5 blocks; not grounded, not
+  elytra-flying. Bonus: +4 HP/block for the first 3 blocks fallen, +2 HP/block
+  for the next 5, +1 HP/block beyond; counts as a critical (+50%) usually.
+  Landing a smash resets fall height (no fall damage). Attack range 3 blocks.
+- Density (I-V): +0.5 damage per block fallen per level (smash only).
+- Breach (I-IV): -15% target armor effectiveness per level. Density and
+  Breach are mutually exclusive on the same mace.
+- Wind Burst (I-III): launches the attacker ~7-8 blocks up after a smash.
+- Shield: 336 durability; a blocked 3+ HP attack costs durability equal to
+  the attack damage rounded up; an axe hit on a fully raised shield disables
+  it for 100 ticks (5 s); the shield must be past its 5-tick raise delay.
+- Spears exist in 1.21.11 and can carry Lunge (I-III), which propels the
+  wielder on a jab - hence the "no-Lunge spears only" trigger rule.
+- Wind charges collide with ender pearls mid-air (verified mechanic), which
+  is what makes Pearl Catch possible.
+- Wurst-style rotation algorithm: budget = speed/20 deg per tick, split
+  proportional to remaining yaw/pitch change, wrap-aware clamping, applied
+  as an additive delta on the player's real mouse input.
+
+--------------------------------------------------------------------------------
+QUALITY BAR (the final audit - do this before delivering)
+--------------------------------------------------------------------------------
+1. Re-read every feature against this spec line by line; fix every mismatch.
+2. Grep the codebase for any raw packet usage (PlayerInteractC2SPacket,
+   ClickSlotC2SPacket, UpdateSelectedSlotC2SPacket, custom sendPacket calls)
+   - there must be NONE outside the vanilla interaction manager paths.
+3. Verify the master kill switch disables everything.
+4. Verify every feature checks its hotbar requirement before acting.
+5. Verify every height/distance check uses player positions.
+6. Verify the collision rules (Shield Draining suppresses Stun Slam).
+7. Build green on CI for Fabric 1.21.11 (Yarn 1.21.11+build.6), deliver the
+   jar, then verify in-game behavior feature by feature.
