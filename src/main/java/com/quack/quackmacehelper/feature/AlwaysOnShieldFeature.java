@@ -58,7 +58,10 @@ public class AlwaysOnShieldFeature {
                 || BreachSwapFeature.isSwapping();
         if (!modOwnsSlot && active && lastKnownSlot != -1
                 && player.getInventory().getSelectedSlot() != lastKnownSlot) {
-            deactivate(client);
+            // V4.1.2: the player's MANUAL slot choice always wins. Deactivate
+            // WITHOUT restoring prevSlot — the old code yanked the selection
+            // back (e.g. you could never switch to food to eat).
+            deactivate(client, false);
             return;
         }
 
@@ -139,11 +142,32 @@ public class AlwaysOnShieldFeature {
     /** Public — called from the disconnect cleanup in QuackMaceHelperClient. */
     public static void hardReset(MinecraftClient client) { deactivate(client); }
 
-    private static void deactivate(MinecraftClient client) {
-        if (client.options != null) client.options.useKey.setPressed(false);
-        if (client.player != null && prevSlot != -1)
+    private static void deactivate(MinecraftClient client) { deactivate(client, true); }
+
+    /**
+     * V4.1.2 fix for the "can't eat / can't use items" bug.
+     *
+     * tick() calls deactivate() EVERY tick while the toggle is OFF — the
+     * old body unconditionally ran useKey.setPressed(false), which
+     * force-released the player's HELD right-click 20 times a second and
+     * made eating, drinking, drawing bows and manual shield blocking
+     * impossible whenever the mod was installed. This must be a complete
+     * NO-OP unless THIS feature was actually active (i.e. we are the ones
+     * who pressed the key / switched the slot in the first place).
+     *
+     * @param restoreSlot false when the player manually switched slots —
+     *                    their manual choice wins, never yank it back.
+     */
+    private static void deactivate(MinecraftClient client, boolean restoreSlot) {
+        boolean wasActive = active;
+        active = false;
+        if (wasActive && client != null && client.options != null) {
+            client.options.useKey.setPressed(false);
+        }
+        if (wasActive && restoreSlot && client != null
+                && client.player != null && prevSlot != -1) {
             InventoryHelper.switchToSlot(client, prevSlot);
-        active        = false;
+        }
         prevSlot      = -1;
         shieldSlot    = -1;
         lastKnownSlot = -1;
