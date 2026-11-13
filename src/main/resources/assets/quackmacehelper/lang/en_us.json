@@ -1,0 +1,23 @@
+{
+  "title.quackmacehelper.config": "QuackMaceHelper v5.0.0",
+  "category.quackmacehelper.general": "General",
+  "category.quackmacehelper.aim_assist": "Aim Assist",
+  "category.quackmacehelper.attribute_swap": "AttributeSwap",
+  "category.quackmacehelper.stun_slam": "Stun Slam",
+  "category.quackmacehelper.pearl_catch": "Pearl Catch",
+  "category.quackmacehelper.shield_draining": "Shield Draining",
+  "category.quackmacehelper.always_on_shield": "Always-On Shield",
+  "category.quackmacehelper.elytra_mace": "Elytra Mace",
+  "category.quackmacehelper.auto_mace": "Auto Mace",
+  "category.quackmacehelper.wind_tackle": "Wind Tackle",
+  "key.categories.quackmacehelper": "QuackMaceHelper",
+  "key.quackmacehelper.open_menu": "Open Mod Menu",
+  "key.quackmacehelper.aim_assist": "Toggle Aim Assist",
+  "key.quackmacehelper.attribute_swap": "Toggle AttributeSwap",
+  "key.quackmacehelper.stun_slam": "Toggle Stun Slam",
+  "key.quackmacehelper.pearl_catch": "Toggle Pearl Catch",
+  "key.quackmacehelper.shield_draining": "Toggle Shield Draining",
+  "key.quackmacehelper.always_on_shield": "Toggle Always-On Shield",
+  "key.quackmacehelper.elytra_mace": "Toggle Elytra Mace",
+  "key.quackmacehelper.auto_mace": "Toggle Auto Mace"
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "quackmacehelper",
+  "version": "${version}",
+  "name": "QuackMaceHelper",
+  "description": "Client-side Mace PvP utility mod for Minecraft 1.21.11.",
+  "authors": [
+    "StXaviersOfficial"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.quack.macehelper.QuackMaceHelperClient"
+    ],
+    "modmenu": [
+      "com.quack.macehelper.config.ModMenuIntegration"
+    ]
+  },
+  "mixins": [
+    "quackmacehelper.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.20.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
