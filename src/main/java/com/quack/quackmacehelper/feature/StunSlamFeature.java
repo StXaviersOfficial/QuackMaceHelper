@@ -24,8 +24,9 @@ import java.util.Random;
  *
  * COLLISION:
  *  - ShieldDraining enabled + target shielded -> StunSlam must NOT run at
- *    all (drain owns the shielded scenario, no axe — the shield staying up
- *    is the point).
+ *    all (spec rev 3, collision rule 5, taken literally: applies to BOTH
+ *    height cases, even when the drain itself is not currently in range —
+ *    no axe hits while draining is the point; the shield stays up).
  *  - AttributeSwap owns the same-tick swap chain: if it fires on the same
  *    hit, StunSlam queues behind it (starts the next tick).
  */
@@ -63,8 +64,10 @@ public class StunSlamFeature {
         if (!TargetHelper.isValidTarget(hitTarget, cfg)) return;
         if (!InventoryHelper.isHoldingShield(hitTarget)) return;
 
-        // COLLISION: ShieldDraining owns the shielded scenario entirely.
-        if (cfg.shieldDraining.enabled && ShieldDrainingFeature.isTargetOwned(hitTarget)) return;
+        // COLLISION: ShieldDraining owns the shielded scenario entirely
+        // (V5.1: spec-literal — enabled + shield up means NO StunSlam axe,
+        // both height cases, even if the drain is not yet in range).
+        if (cfg.shieldDraining.enabled) return;
         // Other owning sequences suppress StunSlam.
         if (ElytraMaceFeature.sequenceActive || AutoMaceFeature.isRunning()) return;
         if (AlwaysOnShieldFeature.isTriggered()) return;
@@ -108,8 +111,9 @@ public class StunSlamFeature {
             reset();
             return;
         }
-        // Collision re-check while running (drain may have started)
-        if (cfg.shieldDraining.enabled && ShieldDrainingFeature.isTargetOwned(target)) {
+        // Collision re-check while running (drain may have been enabled
+        // mid-sequence — same spec-literal rule, both height cases)
+        if (cfg.shieldDraining.enabled) {
             reset();
             return;
         }

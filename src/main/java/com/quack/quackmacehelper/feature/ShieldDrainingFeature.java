@@ -5,8 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
 
-import java.util.Random;
-
 /**
  * ShieldDraining — V5: STANDALONE auto-fire feature (no longer just a
  * modifier inside the old ElytraSwapper).
@@ -31,13 +29,15 @@ import java.util.Random;
  */
 public class ShieldDrainingFeature {
 
-    private static final Random RNG = new Random();
     private static final float ATTACK_RANGE = 3.05f;
     private static final double SCAN_RADIUS = 4.0;
 
-    private static LivingEntity target   = null;
-    private static long  lastHitMs       = 0L;
-    private static int   burstCps        = 50;
+    private static LivingEntity target = null;
+    // V5.1: exact per-tick CPS accumulator (ported from the Gemini
+    // comparison) — replaces the old millisecond-interval timing, which ran
+    // slightly under rate at high CPS. attacks-per-tick = cps/20; the
+    // fractional remainder carries into the next tick.
+    private static double attackAccumulator = 0.0;
 
     public static void tick(MinecraftClient client) {
         ModConfig cfg = ModConfig.get();
@@ -55,17 +55,21 @@ public class ShieldDrainingFeature {
             target = findTarget(client, player);
         }
 
-        if (target == null) return; // idle — no input state touched (R9)
+        if (target == null) { // idle — no input state touched (R9)
+            attackAccumulator = 0.0;
+            return;
+        }
 
-        // Fire at the configured CPS (±10 randomized per burst for anti-cheat)
-        long intervalMs = (long) Math.ceil(1000.0 / burstCps) + RNG.nextInt(3);
-        long now = System.currentTimeMillis();
-        if (now - lastHitMs >= intervalMs) {
-            int mace = DamageCalculator.bestMaceSlot(player);
-            if (mace == -1) { stop(); return; }
-            InventoryHelper.switchToSlot(client, mace);
+        int mace = DamageCalculator.bestMaceSlot(player);
+        if (mace == -1) { stop(); return; }
+        InventoryHelper.switchToSlot(client, mace);
+
+        // Fire at the EXACT configured CPS (accumulator carries fractions)
+        attackAccumulator += cfg.shieldDraining.cps / 20.0;
+        int hitsThisTick = (int) attackAccumulator;
+        attackAccumulator -= hitsThisTick;
+        for (int i = 0; i < hitsThisTick; i++) {
             client.interactionManager.attackEntity(player, target);
-            lastHitMs = now;
         }
     }
 
@@ -96,12 +100,11 @@ public class ShieldDrainingFeature {
     /** Ends the burst (feature toggle off, disconnect, kill switch). */
     public static void stop() {
         target = null;
-        lastHitMs = 0L;
+        attackAccumulator = 0.0;
     }
 
     /** Called by the client initializer when the config toggle flips. */
     public static void onToggled(boolean enabled) {
         if (!enabled) stop();
-        else burstCps = ModConfig.get().shieldDraining.cps;
     }
 }

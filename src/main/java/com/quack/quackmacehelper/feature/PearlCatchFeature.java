@@ -38,7 +38,6 @@ public class PearlCatchFeature {
     private static int              countdown      = -1;
     private static boolean          fired          = false;
     private static boolean          pearlWasAlive  = false;
-    private static boolean          autoArmed      = false;
 
     private static final double WIND_CHARGE_SPEED = 1.5;
     private static final int    SOLVER_ITERATIONS = 8;
@@ -69,8 +68,7 @@ public class PearlCatchFeature {
         if (trackedPearl == null) {
             trackedPearl = pearl;
             fired        = false;
-            autoArmed    = false;
-            countdown    = cfg.pearlCatch.manualMode ? cfg.pearlCatch.delayTicks : -1;
+            countdown    = -1; // not yet qualified
         }
 
         if (fired) return;
@@ -78,17 +76,18 @@ public class PearlCatchFeature {
         int wcSlot = InventoryHelper.findWindChargeSlot(player);
         if (wcSlot == -1) return;
 
-        if (cfg.pearlCatch.manualMode) {
-            if (countdown > 0) { countdown--; return; }
-            fireAt(client, player, pearl, wcSlot, true);
-        } else {
-            // V5: trigger on the PREDICTED APEX of the arc (player heights,
-            // R3) — not on wherever the pearl happens to be right now.
-            double apexAbove = predictedApexHeight(pearl) - player.getY();
-            if (apexAbove < cfg.pearlCatch.triggerHeight) return;
-            if (!autoArmed) { autoArmed = true; return; } // 1-tick buffer
-            fireAt(client, player, pearl, wcSlot, false);
-        }
+        // V5 trigger, both modes: the PREDICTED APEX above the player
+        // (player heights, R3) gates everything — a pearl that never rises
+        // 10+ blocks never triggers a throw, manual mode included.
+        double apexAbove = predictedApexHeight(pearl) - player.getY();
+        if (apexAbove < cfg.pearlCatch.triggerHeight) return;
+
+        // V5.1: the delay slider is honored in BOTH modes (spec: "throw the
+        // wind charge at the selected delay"), counted from the first
+        // qualifying tick.
+        if (countdown == -1) countdown = cfg.pearlCatch.delayTicks;
+        if (countdown > 0) { countdown--; return; }
+        fireAt(client, player, pearl, wcSlot, cfg.pearlCatch.manualMode);
     }
 
     /**
@@ -178,6 +177,6 @@ public class PearlCatchFeature {
 
     private static void reset() {
         trackedPearl = null; countdown = -1;
-        fired = false; pearlWasAlive = false; autoArmed = false;
+        fired = false; pearlWasAlive = false;
     }
 }

@@ -128,6 +128,21 @@ public class AimAssistFeature {
         return 1.0 / Math.max(1e-6, e * 0.15);
     }
 
+    /**
+     * V5.1 (ported from the Gemini comparison): 1.21.11 has separate
+     * invert-X / invert-Y mouse options. updateMouse() flips the sign of
+     * the raw delta for each inverted axis BEFORE the camera turns, so the
+     * assist must pre-flip its own contribution to keep aiming at the
+     * target instead of away from it. Both default to false (no change).
+     */
+    private static double invertXFactor(MinecraftClient client) {
+        return Boolean.TRUE.equals(client.options.getInvertMouseX().getValue()) ? -1.0 : 1.0;
+    }
+
+    private static double invertYFactor(MinecraftClient client) {
+        return Boolean.TRUE.equals(client.options.getInvertMouseY().getValue()) ? -1.0 : 1.0;
+    }
+
     public static double[] onMouseUpdate(double deltaX, double deltaY) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return new double[]{deltaX, deltaY};
@@ -140,7 +155,9 @@ public class AimAssistFeature {
             float diffYaw   = featureNextYaw   - curYaw;
             float diffPitch = featureNextPitch - curPitch;
             double conv = degToRawFactor(client);
-            return new double[]{deltaX + diffYaw * conv, deltaY + diffPitch * conv};
+            return new double[]{
+                    deltaX + diffYaw * conv * invertXFactor(client),
+                    deltaY + diffPitch * conv * invertYFactor(client)};
         }
 
         ModConfig cfg = ModConfig.get();
@@ -162,17 +179,21 @@ public class AimAssistFeature {
         }
 
         double conv = degToRawFactor(client);
-        return new double[]{deltaX + diffYaw * conv, deltaY + diffPitch * conv};
+        return new double[]{
+                deltaX + diffYaw * conv * invertXFactor(client),
+                deltaY + diffPitch * conv * invertYFactor(client)};
     }
 
     // ── Feature-local aim (ElytraMace / AutoMace / StunSlam) ────────────────
 
-    /** Smooth feature aim at a fresh random full-body point (Wurst budget). */
+    /** Smooth feature aim at a fresh random full-body point (Wurst budget).
+     *  V5.1: follows the AimAssist speed slider instead of a hardcoded
+     *  3600 deg/s (ported from the Gemini comparison). */
     public static void featureAimTick(MinecraftClient client, LivingEntity target) {
         if (client.player == null || target == null) return;
         featureAimActive = true;
         Vec3d hitVec = RandomAim.randomFull(target);
-        computeFeatureAngles(client, hitVec, 3600f);
+        computeFeatureAngles(client, hitVec, ModConfig.get().aimAssist.speed);
     }
 
     /** Ends the feature-local aim (every feature MUST call this on finish). */
