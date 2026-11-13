@@ -1,5 +1,5 @@
 ================================================================================
-MASTER PROMPT - BUILD "QUACKMACEHELPER" FROM SCRATCH (rev 2, 2026-11-12)
+MASTER PROMPT - BUILD "QUACKMACEHELPER" FROM SCRATCH (rev 3, 2026-11-13)
 Paste this entire file into any capable AI. It contains everything needed to
 build the complete mod from zero. No other context is required.
 ================================================================================
@@ -45,6 +45,13 @@ ABSOLUTE RULES (violating any of these makes the build unacceptable)
 7. Every toggle, keybind, slider and mode selector must genuinely work.
 8. Research and verify every Minecraft mechanic you rely on against version
    1.21.11 specifically before coding it.
+9. INPUT OWNERSHIP. A feature may only press/release a vanilla key while it
+   is actively using it, and must only release what it pressed itself. A
+   disabled or idle feature must be a complete NO-OP - never write global
+   input state (keyBind.setPressed, selected slot) unconditionally. The
+   player's manual input ALWAYS wins. (The 4.1.1 release had a bug where a
+   disabled feature force-released the use key every tick, making eating
+   impossible - this class of bug must be impossible by construction.)
 
 --------------------------------------------------------------------------------
 MOD MENU LAYOUT (exact top-to-bottom order)
@@ -57,12 +64,13 @@ AIM ASSIST
   - On/off switch
   - Toggle keybind (unbound)
   - Range: 0.1 to 8 blocks
-  - FOV: cone measured from the crosshair, 1 to 360 degrees, default 360
-  - Speed in degrees/second (default 3600)
+  - FOV: cone measured from the crosshair, 1 to 360 degrees, default 180
+  - Speed in degrees/second: slider 600 to 7200, default 3600
   - Speed randomization: ON by default. Each time the aim assist ACTIVATES,
     roll one random value in [0, 200] and either add it to or subtract it
-    from the speed; hold that adjusted speed for the whole activation. Clamp
-    the result to a floor of 10 deg/s so it can never reach zero or below.
+    from the speed; hold that adjusted speed for the whole activation. No
+    clamping is needed: the slider floor (600) minus the max roll (200)
+    still leaves 400 deg/s.
   - Mode: "Smooth" (default) or "Max".
   - Aim At: Head / Center / Feet / Auto.
 ATTRIBUTESWAP
@@ -82,17 +90,12 @@ ELYTRA MACE
   - On/off switch, toggle keybind (unbound)
   - Aim type: Smooth / Instant
   - AutoAim: on/off
-  - FOV: 60 to 360 degrees, default 360
-AUTO MAZE
-  - On/off switch, toggle keybind (unbound)
-  - Auto aim: on/off
-  - Aim type: Smooth / Instant
-  - FOV: 60 to 360 degrees, default 360
+  - FOV: 60 to 360 degrees, default 180
 AUTO MACE
   - On/off switch, toggle keybind (unbound)
   - Auto aim: on/off
   - Aim type: Smooth / Instant
-  - FOV: 60 to 360 degrees, default 360
+  - FOV: 60 to 360 degrees, default 180
 WIND TACKLE
   - A dead "coming soon" button at the very bottom. It does nothing.
 
@@ -153,7 +156,7 @@ STUN SLAM
     ticks, then next tick switch back to the original item.
   Purpose: an axe hit on a raised shield disables that shield for 5 seconds.
   Requires an axe (and for the falling case a mace) in the hotbar.
-  COLLISION: if Shield Draining is enabled and the target's shield is up,
+  COLLATION: if Shield Draining is enabled and the target's shield is up,
   Stun Slam must NOT run - Shield Draining takes over completely.
 
 PEARL CATCH
@@ -181,61 +184,57 @@ SHIELD DRAINING
   durability equal to the attack damage - high-CPS falling mace hits shred
   a 336-durability shield near-instantly.
   While this is active, it owns ALL attack output against that shielded
-  target: Stun Slam's axe phase is suppressed, and Auto Maze's / Auto Mace's
-  attack phases are suppressed too (they only provide aim). No axe hits
-  while draining - the shield staying up is the point.
+  target: Stun Slam's axe phase is suppressed, and Auto Mace's attack phase
+  is suppressed too (it only provides aim). No axe hits while draining - the
+  shield staying up is the point.
 
 ALWAYS-ON SHIELD (anti elytra-macer defense)
   Continuously scan a hemisphere 8 blocks wide centered at the player's
   level for players who are falling or gliding 3+ blocks above the player
   (relative heights; works while you are in the air too).
   When one is found: instantly snap-lock the aim onto them, raise and hold
-  the shield while looking at them (a REAL use-key hold, no packets). Keep
-  holding until the threat descends to 2 blocks above your level (the mace
-  smash stops being possible below 1.5 blocks of height advantage), then
-  release and resume scanning.
-  If the player attacks while the shield is held: drop the shield for that
-  swing and re-raise it while the threat persists.
+  the shield while looking at them (a REAL use-key hold, no packets - and
+  per the INPUT OWNERSHIP rule, only touch the use key while this hold is
+  actually engaged). Keep holding until the threat descends to 2 blocks
+  above your level (the mace smash stops being possible below 1.5 blocks of
+  height advantage), then release and resume scanning.
+  TRIGGERED-STATE RULE: while this feature is TRIGGERED (threat engaged,
+  shield being held), NO other feature may switch slots or attack - all
+  their actions are suspended until the hold ends. Do NOT implement
+  "drop the shield for the player's own swing" - it was explicitly rejected.
+  The player's manual input is never blocked: a manual slot switch ends the
+  hold and the player's slot choice WINS (never yank the selection back).
   Requires a shield in the hotbar or the offhand.
 
 ELYTRA MACE (the flagship)
   Requires: the player is gliding with an elytra (firework boost optional),
   and both an elytra and a chestplate are in the hotbar. While gliding, Auto
-  Maze and Auto Mace stay idle - they are falling-state features.
+  Mace stays idle - it is a falling-state feature.
   With AutoAim ON: while gliding, scan the hemisphere BELOW the player
-  inside the configured FOV (60-360, default 360). When a player is
+  inside the configured FOV (60-360, default 180). When a player is
   detected, run the aim assist using this feature's own aim type (Smooth or
   Instant). The moment the target sits on the crosshair:
-    1) swap the equipped elytra for the chestplate by selecting the
-       chestplate's hotbar slot and using it (right-click) - a REAL
-       equipment swap, no packets;
-    2) if the target's shield is up: switch to the axe slot and hit 5-6
-       times within 1 tick, then switch to the best-damage mace and spam
-       5-6 hits within the next 2 ticks, then end (and release this
+    1) in the FIRST TICK of the engagement: swap the equipped elytra for the
+       chestplate by selecting the chestplate's hotbar slot and using it
+       (right-click) - a REAL equipment swap, no packets;
+    2) then, if the target's shield is up: switch to the axe slot and hit
+       5-6 times within 1 tick, then switch to the best-damage mace and
+       spam 5-6 hits within the next 2 ticks, then end (and release this
        feature's aim);
     3) if no shield: skip the axe, go straight to the best mace spam.
   With AutoAim OFF: no scanning; while gliding 3+ blocks above a target,
-  wait until the target crosses the crosshair, then run the same sequence.
+  wait until the target crosses the crosshair, then run the same sequence
+  (elytra->chestplate swap first, in tick 1).
   The aim is released after each engagement; the feature stays enabled and
   re-arms for the next target.
 
-AUTO MAZE (falling-attack automation, "Elite Maze" style but not a copy)
-  Triggers only while the player is FALLING (not gliding, not grounded) from
-  3+ blocks above a target. Build a hemisphere below the player and look for
-  a target inside the configured FOV (60-360, default 360). If auto aim is
-  on, engage the selected aim type (smooth or instant). When the target is
-  on the cursor, attack - no chestplate swap is needed while plain falling.
-  If the target's shield is up: axe spam first, then best-damage mace spam.
-  If not: direct mace spam, KEPT UP until the smash bonus stops applying.
-  Release the aim when the engagement ends; the feature stays enabled.
-  Requires a mace in the hotbar (plus an axe for the shield path).
-
-AUTO MACE (Elytra Mace's attack sequence without the elytra part)
+AUTO MACE (Elytra Mace's attack sequence without the elytra part - the
+single falling-attack feature)
   Triggers only while the player is FALLING (not gliding) from 3+ blocks
   above a target - you are already falling, so the smash already counts and
   NO elytra/chestplate swap happens.
   With auto aim on: scan the hemisphere below the player inside the
-  configured FOV (60-360, default 360) and engage the selected aim type
+  configured FOV (60-360, default 180) and engage the selected aim type
   (Smooth or Instant). With auto aim off: wait until the target crosses the
   crosshair.
   The moment the target is on the crosshair, run Elytra Mace's exact burst:
@@ -243,9 +242,10 @@ AUTO MACE (Elytra Mace's attack sequence without the elytra part)
       within the next 2 ticks, then release the aim - engagement done;
     - shield down: best-damage mace directly, same 5-6-hit burst, then
       release.
-  ONE precise burst per engagement - unlike Auto Maze, it does NOT keep
-  spamming until the smash bonus ends. Release the aim when done; the
-  feature stays enabled.
+  ONE precise burst per engagement - it does NOT keep spamming afterwards.
+  (If Shield Draining is active against the shielded target, it owns the
+  attacks at its CPS and Auto Mace provides aim only.)
+  Release the aim when done; the feature stays enabled and re-arms.
   Requires a mace in the hotbar (plus an axe for the shield path).
 
 WIND TACKLE
@@ -255,25 +255,30 @@ WIND TACKLE
 COLLISION RULES (who wins when two features could react to the same moment)
 --------------------------------------------------------------------------------
 1. Master kill switch off -> everything is inert except the mod menu itself.
-2. Gliding state -> only Elytra Mace may engage; Auto Maze and Auto Mace
-   are falling-state features and stay idle.
-3. Falling state with BOTH Auto Maze and Auto Mace enabled -> Auto Mace
-   takes priority; Auto Maze stands down completely for that engagement.
-4. Target's shield up + Shield Draining enabled -> Shield Draining owns ALL
+2. Gliding state -> only Elytra Mace may engage; Auto Mace is a
+   falling-state feature and stays idle.
+3. Falling state -> Auto Mace owns the engagement (it is the only falling
+   feature).
+4. Always-On Shield TRIGGERED (threat engaged, shield held) -> ALL other
+   features are suspended - no slot switches, no attacks - until the hold
+   ends (threat released at +2, feature toggled off, or the player
+   manually switches slots).
+5. Target's shield up + Shield Draining enabled -> Shield Draining owns ALL
    attack output at its CPS: Stun Slam's axe phase is suppressed, Auto
-   Maze's and Auto Mace's attack phases are suppressed; whichever feature
-   is engaging provides the aim only. No axe hits while draining.
-5. A feature running its own aim (Elytra Mace, Auto Maze, Auto Mace,
-   Always-On Shield, Pearl Catch's snap) suspends the global Aim Assist
-   until it releases the aim state, and every feature MUST release it when
-   done - nothing may leave the aim state stuck.
-6. Attribute Swap and Stun Slam reacting to the same hit: Attribute Swap
+   Mace's attack phase is suppressed; whichever feature is engaging
+   provides the aim only. No axe hits while draining.
+6. A feature running its own aim (Elytra Mace, Auto Mace, Always-On Shield,
+   Pearl Catch's snap) suspends the global Aim Assist until it releases the
+   aim state, and every feature MUST release it when done - nothing may
+   leave the aim state stuck.
+7. Attribute Swap and Stun Slam reacting to the same hit: Attribute Swap
    owns the same-tick swap chain; Stun Slam queues behind it - one swap
    chain, no slot flicker.
-7. Pearl Catch's instant snap fires immediately even if a combat aim is
+8. Pearl Catch's instant snap fires immediately even if a combat aim is
    active; the combat aim re-engages right after the throw.
-8. Always-On Shield drops the shield for the player's own attack swing and
-   re-raises it while the threat persists.
+9. The player's manual input ALWAYS wins (INPUT OWNERSHIP): a manual slot
+   switch ends an Always-On Shield hold with the player's slot kept; never
+   yank slots or keys from under the player.
 
 --------------------------------------------------------------------------------
 VERIFIED 1.21.11 MECHANICS (use these; do not re-guess them)
@@ -304,11 +309,15 @@ QUALITY BAR (the final audit - do this before delivering)
 2. Grep the codebase for any raw packet usage (PlayerInteractC2SPacket,
    ClickSlotC2SPacket, UpdateSelectedSlotC2SPacket, custom sendPacket calls)
    - there must be NONE outside the vanilla interaction manager paths.
-3. Verify the master kill switch disables every feature while the mod menu
+3. Grep for every setPressed / input-state write: each one must be guarded
+   by an ownership flag so an idle or disabled feature can NEVER touch
+   global input state (INPUT OWNERSHIP).
+4. Verify the master kill switch disables every feature while the mod menu
    itself stays reachable.
-4. Verify every feature checks its hotbar/offhand requirement before acting.
-5. Verify every height/distance check uses player positions.
-6. Verify all eight collision rules, including the gliding/falling split and
-   Auto Mace's priority over Auto Maze.
-7. Build green on CI for Fabric 1.21.11 (Yarn 1.21.11+build.6), deliver the
-   jar, then verify in-game behavior feature by feature.
+5. Verify every feature checks its hotbar/offhand requirement before acting.
+6. Verify every height/distance check uses player positions.
+7. Verify all nine collision rules, including the gliding/falling split and
+   the Always-On Shield triggered-state suspension.
+8. Build green on CI for Fabric 1.21.11 (Yarn 1.21.11+build.6), deliver the
+   jar, then verify in-game behavior feature by feature - including eating,
+   drinking, bows and manual shield blocking with every toggle state.

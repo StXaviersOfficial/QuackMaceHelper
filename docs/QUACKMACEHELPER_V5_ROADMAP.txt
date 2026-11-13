@@ -1,7 +1,8 @@
 ================================================================================
 QUACKMACEHELPER - V5 ROADMAP & CHECKPOINT (expanded from the boss's dictation)
-Rev 2, 2026-11-12: round-1 answers (Q1-Q8) locked in; Auto Maze + Auto Mace
-split into two separate features; spec faults fixed (see Section 6).
+Rev 3, 2026-11-13: round-2 answers locked. AUTO MAZE DOES NOT EXIST (voice
+typos); one feature only: AUTO MACE. Randomizer/speed bounds corrected,
+FOV default 180, AutoShield triggered-state rule added, 4.1.2 eat hotfix.
 Target: Fabric 1.21.11 (client-side) | Goal: publish-ready on Modrinth /
 CurseForge after maximum polish.
 ================================================================================
@@ -9,15 +10,18 @@ CurseForge after maximum polish.
 VOICE-TYPO NORMALIZATION (so nothing gets misunderstood):
   "Worst client"        = Wurst client (aim assist reference)
   "First client"        = Wurst client (AimAt "Auto" reference)
-  "Elite Maze"          = reference falling-mace mod (exact identity still
-                         unconfirmed; closest Modrinth match: "Mace Utils").
+  "Elite Maze"          = reference mod for AUTO MACE ("basically the same
+                         but not exactly that"). Exact identity still
+                         unconfirmed (closest Modrinth match: "Mace Utils").
                          NOT blocking - behavior is fully specified below.
   "stone slamming"      = StunSlam
   "X"                   = axe (the item)
   "zinc"                = Zink renderer (Mojo/MJ Launcher)
-  "Billiard"            = boss's original word for what is now AUTO MAZE
-  "auto maze"           = Auto Maze (falling-attack feature, Elite-Maze-like)
-  "auto mace"           = Auto Mace (NEW feature, ElytraMace-like)
+  "Billiard" /          = VOICE-TYPO ARTIFACTS, not feature names. "Billiard"
+  "Blizzard"            = "oh yeah and"; "auto maze" = "auto mace". There
+  "auto maze"             is exactly ONE falling feature and its name is
+                         AUTO MACE.
+  "AutoShield"          = boss's shorthand for AlwaysOnShield
 
 ================================================================================
 SECTION 0 - GLOBAL RULES (apply to EVERY feature, no exceptions)
@@ -44,7 +48,6 @@ R4. HOTBAR REQUIREMENTS: a feature only activates if its required items are in
       - StunSlam .......... axe (plus a mace for the 3+-block path)
       - AttributeSwap ..... mace (breach mace for the normal path)
       - ShieldDraining .... mace
-      - AutoMaze .......... mace (plus an axe for the shield path)
       - AutoMace .......... mace (plus an axe for the shield path)
       - AlwaysOnShield .... shield in the hotbar OR the offhand
 R5. NO COLLISIONS: features must not fight each other (see collision matrix,
@@ -52,6 +55,11 @@ R5. NO COLLISIONS: features must not fight each other (see collision matrix,
 R6. Every toggle, keybind and selector must actually work; verify each one.
 R7. All keybinds default UNBOUND except the open-menu key.
 R8. All mechanics researched and verified on Minecraft 1.21.11 specifically.
+R9. INPUT OWNERSHIP (learned from the 4.1.1 "can't eat" bug): a feature may
+    only press/release a vanilla key while IT is actively using it, and must
+    release only what IT pressed. NEVER write global input state (key
+    setPressed, slot selection) unconditionally - a disabled/idle feature
+    must be a complete no-op. The player's manual input ALWAYS wins.
 
 ================================================================================
 SECTION 1 - MENU STRUCTURE (exact top-to-bottom order)
@@ -65,13 +73,15 @@ AIM ASSIST
   - On/off switch
   - Toggle keybind (unbound by default)
   - Range selector: 0.1 - 8 blocks
-  - FOV selector (cone from the crosshair): 1-360 degrees, default 360
-  - Speed (degrees per second; 3600 default - CONFIRMED by boss)
+  - FOV selector (cone from the crosshair): 1-360 degrees, DEFAULT 180
+  - Speed selector (degrees per second): 600 - 7200, DEFAULT 3600
+      (slider minimum 600 CONFIRMED by boss; 7200 top = full turn per tick,
+      behaves like Max mode - matches the existing code's snap threshold)
   - Speed randomization (ON by default): when the assist ACTIVATES, roll one
     random value in [0, 200], add OR subtract it from the speed, and hold
     that adjusted speed for the whole activation (CONFIRMED: once per
-    activation, NOT per tick). Clamp the result to a 10 deg/s floor so it can
-    never drop to zero or below.
+    activation, NOT per tick). No clamp needed: slider min 600 - max roll
+    200 = lowest possible effective speed 400.
   - Mode: Smooth (default) | Max
       Smooth = Wurst-style smooth rotation (algorithm in Section 3)
       Max    = instant snap-lock onto the aim point every tick; jitter is
@@ -126,8 +136,7 @@ PEARL CATCH
     selected delay. The wind charge must collide with the pearl mid-air.
   - MANUAL mode: when a qualifying pearl is detected, just throw the wind
     charge at the selected delay - no camera movement, no intercept math.
-  - ONE wind-charge throw per pearl; no retry if the intercept somehow misses
-    (Q13 pending).
+  - ONE wind-charge throw per pearl, no retry on a miss (CONFIRMED, Q13).
   - Requires wind charge in hotbar (R4).
 
 SHIELD DRAINING
@@ -142,11 +151,11 @@ SHIELD DRAINING
     Works because every blocked hit drains shield durability equal to the
     attack damage (Section 3).
   - While active it owns ALL attack output against that shielded target:
-    StunSlam's axe phase is suppressed, and AutoMaze / AutoMace attack phases
-    are suppressed too (they only provide aim in that case). No axe hits
-    while draining - the shield staying up is the point.
+    StunSlam's axe phase is suppressed, and AutoMace's attack phase is
+    suppressed too (it only provides aim in that case). No axe hits while
+    draining - the shield staying up is the point.
 
-ALWAYS-ON SHIELD (anti elytra-macer defense)
+ALWAYS-ON SHIELD (boss calls it "AutoShield")
   - On/off switch, toggle keybind (unbound)
   - Constantly scans a hemisphere 8 blocks wide around the user's level for
     players who are falling from 3+ blocks above the user OR gliding 3+
@@ -154,27 +163,34 @@ ALWAYS-ON SHIELD (anti elytra-macer defense)
     in the air).
   - On detection: instant snap-aim (lock) at the threat, hold the shield up
     while looking at them, keep holding while they fall. The hold is a REAL
-    use-key hold (no packets).
+    use-key hold (no packets, and per R9 it only touches the key while the
+    hold is actually engaged).
   - Requires a shield in the hotbar OR the offhand (R4).
-  - Release when the threat descends to user level +2 blocks (locked per Q6
-    "yes" = the safe option; mace smash needs 1.5+ blocks of height
-    advantage - see Q14 to switch to +1 if you meant that).
-  - If the user attacks while the shield is being held: drop the shield for
-    the swing, re-raise while the threat persists (Q12 pending).
+  - Release when the threat descends to user level +2 blocks (CONFIRMED, Q14;
+    mace smash needs 1.5+ blocks of height advantage).
+  - TRIGGERED-STATE RULE (CONFIRMED, Q12): while AlwaysOnShield is TRIGGERED
+    (threat engaged, shield being held), NO other feature may switch slots or
+    attack - all their actions are suspended until the hold ends. The
+    drop-shield-for-your-own-swing idea was REJECTED: do not implement it.
+  - The player's own manual input is never blocked: a manual slot switch ends
+    the hold and the player's slot choice WINS (never yank it back - the 4.1.1
+    slot-yank bug must not return).
 
 ELYTRA MACE (replaces the old "ElytraSwapper") - MOST IMPORTANT FEATURE
   - On/off switch, toggle keybind (unbound)
   - AimAssist type selector: Smooth | Instant
   - AutoAim: on/off
-  - FOV selector: 60 - 360 degrees, default 360
+  - FOV selector: 60 - 360 degrees, DEFAULT 180 (CONFIRMED, Q11)
   - ACTIVATION REQUIRES the user gliding with an elytra (firework boost
-    optional). While gliding, AutoMaze and AutoMace stay idle (collision
-    matrix) - they are FALLING features.
+    optional). While gliding, AutoMace stays idle (collision matrix) - it is
+    a FALLING feature.
   - AUTOAIM ON: while gliding, scan a hemisphere BELOW the user inside the
     selected FOV; when a player is detected, engage the aim assist with the
     selected type (smooth or instant). Once the target is ON the crosshair:
-      1) swap elytra -> chestplate by selecting the chestplate's HOTBAR slot
-         and right-clicking it (real equipment swap - NOT packets);
+      1) THE FIRST TICK of the engagement: swap elytra -> chestplate by
+         selecting the chestplate's HOTBAR slot and right-clicking it (real
+         equipment swap - NOT packets) (CONFIRMED, Q9: the swap happens in
+         tick 1, then everything else follows);
       2) IF the target's shield is up: switch to the axe slot, hit with the
          axe 5-6 times within 1 tick, then switch to the best-damage mace
          (calculated) and spam it 5-6 times within the next 2 ticks, then the
@@ -182,55 +198,35 @@ ELYTRA MACE (replaces the old "ElytraSwapper") - MOST IMPORTANT FEATURE
       3) IF no shield: go straight to the mace (same spam pattern).
   - AUTOAIM OFF: no hemisphere scan; instead, while gliding 3+ blocks above a
     target (R3), wait until the target crosses the crosshair, then run the
-    same swap/attack sequence (elytra->chestplate, shield check, axe/mace).
+    same swap/attack sequence (elytra->chestplate in tick 1, shield check,
+    axe/mace).
   - The aim is released after EACH engagement; the feature itself stays
     enabled and re-arms for the next target.
   - Requires elytra AND chestplate in hotbar (R4).
 
-AUTO MAZE (was "Billiard" in the dictation; behaves like the boss's "Elite
-Maze" reference but must NOT be an exact copy)
+AUTO MACE (the ONE falling feature; like the boss's "Elite Maze" reference
+and like ElytraMace - but NOT an exact copy of either. Confirmed by boss,
+Q9)
   - On/off switch, toggle keybind (unbound)
   - Auto aim: on/off
   - Aim type: Smooth | Instant
-  - FOV selector: 60 - 360 degrees, default 360
-  - Behavior:
-    1) user is FALLING (not gliding, not grounded) from 3+ blocks above a
-       target (R3);
-    2) create a hemisphere BELOW the player and check for a target inside the
-       selected FOV;
-    3) if auto aim is on, engage the selected aim type;
-    4) when the target is on the cursor, perform the attack. No chestplate
-       swap needed here - the smash bonus already counts while falling;
-    5) target shield up  -> axe spam, then best-damage mace spam (UNLESS
-       ShieldDraining owns the attacks - collision matrix; then AutoMaze
-       provides aim only);
-    6) target shield down-> direct mace spam, KEPT UP until the smash bonus
-       stops counting (that continuous spam is the Elite-Maze feel);
-    7) release the aim when the engagement ends; feature stays enabled.
-  - Requires a mace in the hotbar (plus an axe for the shield path).
-
-AUTO MACE (NEW feature - boss: "basically ElytraMace, but not exactly that";
-interpretation below is what got built into the master prompt - final confirm
-is Q9)
-  - On/off switch, toggle keybind (unbound)
-  - Auto aim: on/off
-  - Aim type: Smooth | Instant
-  - FOV selector: 60 - 360 degrees, default 360
-  - Behavior: the ElytraMace attack sequence WITHOUT gliding and WITHOUT the
+  - FOV selector: 60 - 360 degrees, DEFAULT 180 (CONFIRMED, Q11)
+  - Behavior: ElytraMace's attack sequence WITHOUT gliding and WITHOUT the
     elytra->chestplate swap (you are already falling, so the smash already
     counts):
     1) user is FALLING (not gliding) 3+ blocks above a target (R3);
-    2) hemisphere BELOW the player + FOV scan; autoaim per settings (AutoAim
-       OFF = wait for the target to cross the crosshair, like ElytraMace);
+    2) hemisphere BELOW the player + FOV scan; autoaim per settings (auto
+       aim OFF = wait for the target to cross the crosshair, like
+       ElytraMace);
     3) on lock, IF the target's shield is up: axe 5-6 hits within 1 tick ->
        best-damage mace (calculated) 5-6 hits within the next 2 ticks ->
-       release the aim, engagement done (unless ShieldDraining owns the
-       attacks - collision matrix);
+       release the aim, engagement done (UNLESS ShieldDraining owns the
+       attacks - collision matrix; then AutoMace provides aim only);
     4) on lock, IF no shield: best-damage mace directly, same 5-6-hit burst,
        then release;
-    5) ONE precise burst per engagement - unlike AutoMaze it does NOT keep
-       spamming until the smash bonus ends. That burst-vs-continuous split is
-       the AutoMace/AutoMaze difference (Q9).
+    5) ONE precise burst per engagement - it does NOT keep spamming after
+       the burst. Release the aim when done; the feature stays enabled and
+       re-arms.
   - Requires a mace in the hotbar (plus an axe for the shield path).
 
 WIND TACKLE
@@ -238,35 +234,41 @@ WIND TACKLE
     dead "WindTackle - coming soon" button that does nothing.
 
 ================================================================================
-SECTION 2 - COLLISION MATRIX (updated rev 2)
+SECTION 2 - COLLISION MATRIX (updated rev 3)
 ================================================================================
 - Master kill switch OFF  -> every feature dead, period. ONLY the menu key /
                             ModMenu entry still respond (so it can be
                             re-enabled in-game).
-- Gliding state           -> only ElytraMace may engage. AutoMaze and
-                            AutoMace are FALLING features and stay idle.
-- Falling + AutoMaze AND AutoMace both ON
-                          -> AutoMace takes priority; AutoMaze stands down
-                            completely for that engagement (Q10 proposal).
+- Gliding state           -> only ElytraMace may engage. AutoMace is a
+                            FALLING feature and stays idle while gliding.
+- Falling state           -> AutoMace owns the engagement (only one falling
+                            feature exists).
+- AlwaysOnShield TRIGGERED (threat engaged, shield held)
+                          -> ALL other features are suspended: no slot
+                            switches, no attacks, until the hold ends
+                            (CONFIRMED, Q12). When the hold ends (threat
+                            released at +2, user toggles off, or the user
+                            manually switches slots), everything resumes.
 - Target's shield up + ShieldDraining ON
                           -> ShieldDraining owns ALL attack output at its CPS
                             for every feature: StunSlam axe phase suppressed,
-                            AutoMaze / AutoMace attack phases suppressed -
-                            whichever feature is engaging provides the AIM
-                            only. No axe hits while draining.
-- ShieldDraining OFF (or target unshielded) -> StunSlam / AutoMaze / AutoMace
-                            behave normally.
-- Feature-local aim (ElytraMace / AutoMace / AutoMaze / AlwaysOnShield /
-  PearlCatch snap) active -> the global AimAssist is suspended until the
-  feature releases the aim state; every feature MUST release on finish so
-  nothing is ever left stuck.
+                            AutoMace attack phase suppressed - whichever
+                            feature is engaging provides the AIM only. No
+                            axe hits while draining.
+- ShieldDraining OFF (or target unshielded) -> StunSlam / AutoMace behave
+                            normally.
+- Feature-local aim (ElytraMace / AutoMace / AlwaysOnShield / PearlCatch
+  snap) active -> the global AimAssist is suspended until the feature
+  releases the aim state; every feature MUST release on finish so nothing is
+  ever left stuck.
 - AttributeSwap and StunSlam both fire on the same hit -> AttributeSwap owns
   the same-tick swap; StunSlam must queue behind it (single swap chain, no
   slot flicker conflicts).
 - PearlCatch's instant snap executes immediately even if a combat aim is
   active; the combat aim re-engages right after the throw.
-- AlwaysOnShield holding + the user attacks -> drop the shield for the swing,
-  re-raise while the threat persists (Q12 proposal).
+- Player manual input ALWAYS wins (R9): manual slot switch ends an
+  AlwaysOnShield hold with the player's slot kept; never yank slots or keys
+  from under the player.
 
 ================================================================================
 SECTION 3 - VERIFIED MECHANICS RESEARCH (Minecraft 1.21.11)
@@ -318,6 +320,13 @@ INPUT-RATE REALITY (ShieldDraining CPS, StunSlam/AutoMace burst hits):
     InteractPacket through the interaction manager) - no raw packets needed,
     R2 stays intact. To a server it looks like an autoclicker; that is
     inherent to what these features are.
+INPUT-OWNERSHIP LESSON (the 4.1.1 "can't eat" bug, fixed in 4.1.2):
+  - AlwaysOnShieldFeature.tick() called deactivate() on the disabled path
+    every tick, and deactivate() unconditionally ran
+    options.useKey.setPressed(false) - force-releasing the player's HELD
+    right-click 20x/second. Eating/drinking/bows/manual blocking never
+    completed. Rule R9 exists so this class of bug can never return: guard
+    every setPressed/slot-restore with "was I the one who set it".
 
 ================================================================================
 SECTION 4 - EXISTING 4.1.1 BASELINE (what gets reworked vs kept)
@@ -325,15 +334,18 @@ SECTION 4 - EXISTING 4.1.1 BASELINE (what gets reworked vs kept)
 Kept as-is: target selection (players/mobs/animals), open-menu key, HUD,
 ModMenu integration, config persistence, RandomAim (anti-pattern micro-jitter
 used by the aim system).
-Reworked: AimAssist (defaults, randomization semantics, mode switch, Auto aim
-point), BreachSwap -> AttributeSwap, StunSlam (aimed-player shield check +
-spam timings + collision), PearlCatch (auto/manual + snap-look + delay +
-own-pearls-only), ShieldDraining (CPS 20-250 default 50 + auto-fire +
+Reworked: AimAssist (defaults incl. FOV 180 + speed 600-7200 default 3600,
+randomization semantics, mode switch, Auto aim point), BreachSwap ->
+AttributeSwap, StunSlam (aimed-player shield check + spam timings +
+collision), PearlCatch (auto/manual + snap-look + delay + own-pearls-only +
+single throw), ShieldDraining (CPS 20-250 default 50 + auto-fire +
 collision), AlwaysOnShield (8-block hemisphere + snap aim + release height +
-offhand), ElytraSwapper -> ElytraMace (full attack sequence), keybinds (all
-unbound by default).
-New: master kill switch, AutoMaze, AutoMace, WindTackle "coming soon" stub.
+offhand + triggered-state suspension + input ownership), ElytraSwapper ->
+ElytraMace (full attack sequence, swap in tick 1), keybinds (all unbound by
+default).
+New: master kill switch, AutoMace, WindTackle "coming soon" stub.
 Deleted: WindChargeTackle feature + its config + keybind.
+Hotfixed in 4.1.2 (2026-11-13, commit a17ee66): the eat bug (see Section 3).
 Useful reference: upstream BetterMaceSwap 5.0.0-1.21.11 (same mod lineage)
 already implements AttributeSwapMode/LungeSwap/StunSlamMode vocabulary and a
 pearl position simulator - mine it for physics and timing patterns.
@@ -355,20 +367,25 @@ SECTION 5 - CHECKPOINT / TODO (mark off as completed)
 [x] MojoLauncher v3 forked (StXaviersOfficial/MojoLauncher) for the launcher
     patches (Zink guard + virtual mouse sensitivity decoupling)
 [x] Roadmap checkpoint file (this file) + master prompt file created
-[x] Boss round-1 answers locked in (Q1-Q8, 2026-11-12): Billiard -> AutoMaze
-    + NEW AutoMace; PearlCatch own pearls only; AimAt "Auto" option added;
-    speed default 3600; AlwaysOnShield release +2; randomization once per
-    activation; CPS default 50. Spec faults fixed: kill-switch/menu-key
-    conflict, impossible "1-2 ticks early", ShieldDraining-vs-AutoMaze/
-    AutoMace collision gap, randomization floor clamp, AlwaysOnShield shield
-    source, activation definition.
-[ ] V5 branch created; config schema extended (kill switch, new options,
-    CPS bounds 20-250 default 50, unbound keybinds, AutoMaze/AutoMace
-    sections)
+[x] Boss round-1 answers locked (Q1-Q8, 2026-11-12)
+[x] Boss round-2 answers locked (Q9-Q14, 2026-11-13): ONE feature AutoMace
+    (no Auto Maze - voice typos); ElytraMace swaps elytra->chestplate in
+    tick 1; FOV defaults 180; AlwaysOnShield triggered = other features
+    fully suspended, drop-for-swing rejected; PearlCatch single throw;
+    release height +2. Randomizer corrected: speed slider min 600, roll
+    [0,200] add/sub, no clamp (min effective 400).
+[x] "Can't eat" bug root-caused + FIXED: AlwaysOnShield deactivate() ran
+    useKey.setPressed(false) every tick on the disabled path (and yanked
+    slots back on manual switch). Hotfix 4.1.2 (commit a17ee66) on branch
+    v4.1.1-1.21.11; release v4.1.2-1.21.11 published; fix also cherry-picked
+    to the V5 branch.
+[ ] V5 branch: config schema extended (kill switch, new options, CPS bounds
+    20-250 default 50, FOV defaults 180, speed 600-7200 default 3600,
+    unbound keybinds, AutoMace section, AlwaysOnShield triggered rule)
 [ ] Master kill switch implemented + verified (mod fully inert when off,
     menu still reachable)
-[ ] AimAssist rework (Wurst math, speed 3600 default, randomization once per
-    activation with 10 deg/s floor, Smooth/Max modes, AimAt
+[ ] AimAssist rework (Wurst math, FOV 180 default, speed 600-7200 default
+    3600, randomization once per activation, Smooth/Max modes, AimAt
     head/center/feet/auto)
 [ ] AttributeSwap (trigger items incl. no-Lunge spears + empty hand, same
     tick hit, 1-4 tick randomized swap-back, best-mace calculator)
@@ -381,19 +398,19 @@ SECTION 5 - CHECKPOINT / TODO (mark off as completed)
     mace, starts the tick the target enters range, owns all attack output
     vs shielded targets)
 [ ] AlwaysOnShield (8-block hemisphere at user level, snap lock, real
-    use-key hold, shield in hotbar or offhand, release at +2, drop-for-swing)
+    use-key hold with INPUT OWNERSHIP, shield in hotbar or offhand, release
+    at +2, triggered-state suspends all other features, manual switch wins)
 [ ] ElytraMace (gliding requirement, hemisphere below within FOV 60-360
-    default 360, smooth/instant aim, elytra->chestplate real swap, axe+mace
-    spam sequence, autoaim on/off paths, aim release per engagement)
-[ ] AutoMaze (falling not gliding, hemisphere below, aim options, attack on
-    cursor, spam until smash bonus stops counting, shield branch)
+    default 180, smooth/instant aim, elytra->chestplate real swap IN TICK 1,
+    axe+mace spam sequence, autoaim on/off paths, aim release per engagement)
 [ ] AutoMace (falling not gliding, ElytraMace burst WITHOUT swap, single
-    precise burst per engagement, aim release)
+    precise burst per engagement, aim release, shield branch)
 [ ] WindChargeTackle deleted; "coming soon" dead button added
 [ ] Real-actions audit: zero raw packet sends anywhere (R2)
 [ ] Player-position measurement audit across all features (R3)
+[ ] Input-ownership audit: every setPressed/slot-restore guarded (R9)
 [ ] Collision matrix verified live (R5, Section 2 - incl. gliding/falling
-    split and AutoMace-over-AutoMaze priority)
+    split and AlwaysOnShield triggered-state suspension)
 [ ] Full code re-read vs this spec; fix every mismatch; repeat until clean
 [ ] CI green on the V5 branch; jar delivered to the phone; in-game verified
 
@@ -401,37 +418,34 @@ SECTION 5 - CHECKPOINT / TODO (mark off as completed)
 SECTION 6 - QUESTIONS FOR THE BOSS
 ================================================================================
 ROUND 1 - ANSWERED 2026-11-12 (locked into this file + master prompt):
-  Q1 "Billiard" -> it is AUTO MAZE; plus a SECOND new feature, AUTO MACE.
-  Q2 "Elite Maze" identity -> still unconfirmed (closest: "Mace Utils" on
-     Modrinth). NOT blocking: the behavior is fully specified in Section 1.
-  Q3 PearlCatch -> ONLY the user's own pearls (owner check, ignore everyone
-     else's).
-  Q4 AimAt -> yes, add the 4th "Auto" option (Wurst-style closest point of
-     the hitbox to the player's eyes).
+  Q1 "Billiard" -> voice typo for "oh yeah and" - never a feature. The ONE
+     falling feature is AUTO MACE.
+  Q2 "Elite Maze" -> reference mod for AutoMace (identity still unconfirmed;
+     closest: "Mace Utils" on Modrinth). NOT blocking.
+  Q3 PearlCatch -> ONLY the user's own pearls (owner check, ignore others').
+  Q4 AimAt -> yes, 4th "Auto" option (Wurst closest-hitbox-point).
   Q5 AimAssist speed -> 3600 deg/s default confirmed.
-  Q6 AlwaysOnShield release height -> answered "yes"; interpreted as the
-     first/safe option offered: release at user level +2. See Q14.
-  Q7 Speed randomization -> one roll per activation, held for the whole
-     activation (not re-rolled per tick).
-  Q8 ShieldDraining CPS -> range 20-250, default 50.
+  Q6 AlwaysOnShield release -> +2 (see Q14).
+  Q7 Speed randomization -> one roll per activation, held whole activation.
+  Q8 ShieldDraining CPS -> 20-250, default 50.
 
-ROUND 2 - OPEN (answer via chat or ntfy):
-  Q9. AutoMace interpretation (Section 1): falling (not gliding), NO
-      elytra/chestplate swap, ElytraMace's exact burst (shield -> axe 5-6
-      hits in 1 tick -> best mace 5-6 hits in the next 2 ticks; no shield ->
-      best mace directly), ONE burst per engagement. Correct? And the
-      difference vs AutoMaze = AutoMaze keeps spamming until the smash bonus
-      stops counting, while AutoMace does one precise burst and stops?
-  Q10. AutoMaze AND AutoMace both ON while falling: AutoMace wins and
-       AutoMaze stands down (my proposal). OK?
-  Q11. FOV defaults: ElytraMace / AutoMaze / AutoMace = 60-360 default 360;
-       global AimAssist = 1-360 default 360. OK?
-  Q12. AlwaysOnShield: while it holds your shield and YOU attack, drop the
-       shield for your swing and re-raise while the threat persists (my
-       proposal). OK?
-  Q13. PearlCatch: one wind-charge throw per pearl, no retry on a miss. OK?
-  Q14. Q6 was "+2 or +1?" - I locked +2 (safe). Confirm, or say "+1" to
-       switch.
+ROUND 2 - ANSWERED 2026-11-13 (locked into this file + master prompt):
+  Q9 AutoMace -> confirmed: falling, no swap, ElytraMace's exact burst, ONE
+     burst per engagement. PLUS: ElytraMace must swap elytra->chestplate in
+     the FIRST tick of the engagement, then the rest follows.
+  Q10 -> void (there is no Auto Maze to prioritize against).
+  Q11 FOV defaults -> 180 everywhere.
+  Q12 AlwaysOnShield -> while TRIGGERED, no other feature may switch slots
+     (their actions suspend); drop-for-swing rejected.
+  Q13 PearlCatch -> one wind charge per pearl, no retry. Confirmed.
+  Q14 Release height -> +2. Confirmed.
+
+STILL OPEN (minor, non-blocking - answer via ntfy whenever):
+  M1. AimAssist speed slider MAX: I set 7200 deg/s (= 360 deg per tick; the
+      code already treats >= 7200 as snap). OK, or different cap?
+  M2. AimAt default option: Head (options are Head/Center/Feet/Auto). OK?
+  M3. 4.1.2 hotfix is 1.21.11 only. Want the same fix backported to the
+      1.21.1 branch (4.1.2 for MC 1.21.1) too, or is 1.21.11 all you play?
 
 ================================================================================
 SECTION 7 - SIDE TRACKS STATUS (for context)
@@ -442,8 +456,9 @@ SECTION 7 - SIDE TRACKS STATUS (for context)
 - Zink renderer: crashes on world load (line-240 NPE confirmed = secondary
   crash after the native renderer died; Mali-G68 + Zink is the prime
   suspect). Recommendation until patched: keep playing on Holy Gl4ses.
-- Phone bridge is OFFLINE since this morning (bridge loop died in Termux) -
-  restart it to restore remote control, ntfy pings and file delivery.
+- Phone bridge is OFFLINE (bridge loop died in Termux) - restart it to
+  restore remote control, direct file delivery to the phone, and sandbox
+  ntfy relay. Until then: grab jars straight from the GitHub releases page.
 - GitHub: old account (StXaviersOfficial) healthy, 36 repos, token verified;
   new account still suspended. PAT readable by you at:
   github.com/StXaviersOfficial/credentials-vault -> live-vault/github_token
