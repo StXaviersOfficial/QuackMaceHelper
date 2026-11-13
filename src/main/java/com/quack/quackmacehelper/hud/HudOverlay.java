@@ -30,6 +30,8 @@ public class HudOverlay {
     private static void onHudRender(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || messages.isEmpty()) return;
+        // Master kill switch: no HUD either (R1 — mod fully inert).
+        if (!com.quack.quackmacehelper.config.ModConfig.get().masterEnabled) return;
 
         int screenWidth = context.getScaledWindowWidth();
         int screenHeight = context.getScaledWindowHeight();

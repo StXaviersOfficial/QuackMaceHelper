@@ -5,171 +5,162 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 
 /**
- * AlwaysOnShield — Stage 3 rewrite.
+ * AlwaysOnShield ("AutoShield") — V5 rewrite. Anti elytra-macer defense.
  *
- * Equips shield (or totem) and holds USE when a threat is detected.
+ * Continuously scans a hemisphere (default 8 blocks wide) centered at the
+ * player's level for players who are FALLING from 3+ blocks above the
+ * player OR GLIDING from 3+ blocks above the player (R3 body heights; also
+ * works while the player is in the air).
  *
- * Threat conditions (ANY of these):
- *   A. Opponent is gliding (isFallFlying) toward us within radius.
- *   B. Opponent is falling (vy < -0.1) AND within our FOV (120°) AND moving toward us.
+ * On detection: instant snap-lock the aim onto the threat, raise and hold
+ * the shield while looking at them (a REAL use-key hold — no packets). Keep
+ * holding until the threat descends to player level +2 blocks (the mace
+ * smash stops being possible below 1.5 blocks of height advantage), then
+ * release and resume scanning.
  *
- * Both A and B use the dual check:
- *   - velocity dot-product toward us > 0.3
- *   - look direction dot-product toward us > 0.4
- *     (prevents triggering on someone flying past, looking away)
+ * TRIGGERED-STATE RULE (Q12): while TRIGGERED, NO other feature may switch
+ * slots or attack — they all check isTriggered() and stand down.
+ * "Drop the shield for the player's own swing" is intentionally NOT
+ * implemented (rejected by the owner).
  *
- * Deactivates when no qualifying threat exists within radius.
- * Respects manual slot switch — if the player manually changes slot, deactivates.
+ * INPUT OWNERSHIP (R9, the 4.1.2 lesson): the use key is only ever
+ * pressed while the hold is engaged and only released if WE pressed it.
+ * The player's manual slot switch ends the hold and their slot choice WINS
+ * (never yanked back).
+ *
+ * Shield source: offhand first (no slot switch needed), otherwise a hotbar
+ * shield slot.
  */
 public class AlwaysOnShieldFeature {
 
-    // Facing threshold — opponent's look vec dot-product toward us
-    private static final double LOOK_THRESHOLD     = 0.4;
-    // Velocity threshold — opponent's velocity dot-product toward us
-    private static final double VELOCITY_THRESHOLD = 0.3;
-    // FOV for condition B (falling opponent must be within our view)
-    private static final float  OUR_FOV_DEG        = 120f;
+    // Release cutoff: threat descends to player level + 2 (confirmed Q14)
+    private static final double RELEASE_HEIGHT = 2.0;
+    private static final double TRIGGER_HEIGHT = 3.0;
 
-    private static boolean active        = false;
+    private static boolean triggered     = false;
+    private static boolean useKeyHeldByUs = false;
     private static int     prevSlot      = -1;
-    private static int     shieldSlot    = -1;
+    private static int     shieldSlot    = -1; // -1 = offhand shield
     private static int     lastKnownSlot = -1;
 
     public static void tick(MinecraftClient client) {
         ModConfig cfg = ModConfig.get();
-        if (!cfg.alwaysOnShield.enabled) { deactivate(client); return; }
+        if (!cfg.alwaysOnShield.enabled) { deactivate(client, true); return; }
         if (client.player == null || client.world == null) return;
 
         // Holding USE with a GUI open is impossible for a real player —
         // stand down instead of fighting the screen.
-        if (client.currentScreen != null) { deactivate(client); return; }
+        if (client.currentScreen != null) { deactivate(client, true); return; }
 
         ClientPlayerEntity player = client.player;
 
-        // Manual-switch detection: player changed away from the shield slot.
-        // V4.1.1: the mod's OWN attack sequences (BreachSwap swap-back,
-        // StunSlam, ElytraSwapper) also change slots — those are NOT manual
-        // switches, so they no longer spurious-deactivate the shield.
-        boolean modOwnsSlot = ElytraSwapperFeature.sequenceActive
-                || StunSlamFeature.isRunning()
-                || BreachSwapFeature.isSwapping();
-        if (!modOwnsSlot && active && lastKnownSlot != -1
-                && player.getInventory().getSelectedSlot() != lastKnownSlot) {
-            // V4.1.2: the player's MANUAL slot choice always wins. Deactivate
-            // WITHOUT restoring prevSlot — the old code yanked the selection
-            // back (e.g. you could never switch to food to eat).
-            deactivate(client, false);
-            return;
+        if (triggered) {
+            // Manual-switch detection: the player changed away from the
+            // shield slot. The mod's OWN sequences don't run while we are
+            // triggered (Q12 suspends them), so any change is manual.
+            // The player's manual choice ALWAYS wins — deactivate without
+            // restoring prevSlot (never yank it back).
+            if (lastKnownSlot != -1
+                    && player.getInventory().getSelectedSlot() != lastKnownSlot) {
+                deactivate(client, false);
+                return;
+            }
         }
 
         LivingEntity threat = findThreat(client, cfg.alwaysOnShield.radius);
 
         if (threat == null) {
-            if (active) deactivate(client);
+            if (triggered) deactivate(client, true);
             return;
         }
 
-        // Activate if not already active
-        if (!active) {
-            int ss = findInHotbar(player, net.minecraft.item.Items.SHIELD);
-            int ts = findInHotbar(player, net.minecraft.item.Items.TOTEM_OF_UNDYING);
-            int equipSlot = ss != -1 ? ss : ts;
-            if (equipSlot == -1) return; // nothing to equip
+        if (!triggered) {
+            // ── Engage ───────────────────────────────────────────────────
+            ItemStack offhand = player.getOffHandStack();
+            int hotbarShield = findInHotbar(player, Items.SHIELD);
+            if (offhand.getItem() == Items.SHIELD) {
+                shieldSlot = -1; // offhand — no slot switch needed
+            } else if (hotbarShield != -1) {
+                shieldSlot = hotbarShield;
+                prevSlot = player.getInventory().getSelectedSlot();
+                InventoryHelper.switchToSlot(client, shieldSlot);
+            } else {
+                return; // R4: no shield in hotbar or offhand -> nothing to do
+            }
 
-            prevSlot  = player.getInventory().getSelectedSlot();
-            shieldSlot = equipSlot;
-            InventoryHelper.switchToSlot(client, equipSlot);
-            lastKnownSlot = equipSlot;
+            // Instant snap-lock onto the threat (spec: no smoothing)
+            AimAssistFeature.snapAimAt(client, RandomAim.randomFull(threat));
 
-            // Hold USE to block with shield
-            if (ss != -1) client.options.useKey.setPressed(true);
-            active = true;
-        }
-
-        // Keep shield raised every tick while threat is present
-        if (shieldSlot != -1
-                && player.getInventory().getStack(shieldSlot).getItem()
-                   == net.minecraft.item.Items.SHIELD) {
+            // REAL use-key hold — we own it from now on (R9)
             client.options.useKey.setPressed(true);
+            useKeyHeldByUs = true;
+            triggered = true;
+            lastKnownSlot = player.getInventory().getSelectedSlot();
+            return;
         }
 
-        lastKnownSlot = player.getInventory().getSelectedSlot();
+        // ── Hold: keep looking at the threat, keep the shield up ─────────
+        AimAssistFeature.snapAimAt(client, RandomAim.randomFull(threat));
+        client.options.useKey.setPressed(true);
+
+        // Release when the threat descends to player level +2
+        if (TargetHelper.heightAbove(player, threat) <= RELEASE_HEIGHT) {
+            deactivate(client, true);
+        }
     }
-
-    private static LivingEntity findThreat(MinecraftClient client, float radius) {
-        if (client.player == null || client.world == null) return null;
-        Vec3d ourPos = client.player.getEntityPos();
-
-        return client.world.getEntitiesByClass(PlayerEntity.class,
-            client.player.getBoundingBox().expand(radius), e -> {
-                if (e == client.player || !e.isAlive()) return false;
-                if (client.player.distanceTo(e) > radius) return false;
-
-                Vec3d toUs = ourPos.subtract(e.getEntityPos()).normalize();
-
-                // Velocity toward us
-                Vec3d vel = e.getVelocity();
-                if (vel.lengthSquared() < 0.001) return false;
-                double velDot = vel.normalize().dotProduct(toUs);
-                if (velDot < VELOCITY_THRESHOLD) return false;
-
-                // Look direction toward us
-                Vec3d look = e.getRotationVec(1.0f);
-                double lookDot = look.dotProduct(toUs);
-                if (lookDot < LOOK_THRESHOLD) return false;
-
-                boolean gliding = e.isGliding();
-                boolean falling = !e.isOnGround() && e.getVelocity().y < -0.1;
-
-                // Condition A: gliding toward us
-                if (gliding) return true;
-
-                // Condition B: falling toward us AND within OUR fov
-                if (falling && TargetHelper.isInFov(client, e, OUR_FOV_DEG)) return true;
-
-                return false;
-            })
-            .stream()
-            .min((a, b) -> Double.compare(
-                client.player.distanceTo(a),
-                client.player.distanceTo(b)))
-            .orElse(null);
-    }
-
-    /** Public — called from the disconnect cleanup in QuackMaceHelperClient. */
-    public static void hardReset(MinecraftClient client) { deactivate(client); }
-
-    private static void deactivate(MinecraftClient client) { deactivate(client, true); }
 
     /**
-     * V4.1.2 fix for the "can't eat / can't use items" bug.
-     *
-     * tick() calls deactivate() EVERY tick while the toggle is OFF — the
-     * old body unconditionally ran useKey.setPressed(false), which
-     * force-released the player's HELD right-click 20 times a second and
-     * made eating, drinking, drawing bows and manual shield blocking
-     * impossible whenever the mod was installed. This must be a complete
-     * NO-OP unless THIS feature was actually active (i.e. we are the ones
-     * who pressed the key / switched the slot in the first place).
+     * Threat = a player within the hemisphere, 3+ blocks ABOVE the player
+     * (R3), currently falling or gliding.
+     */
+    private static LivingEntity findThreat(MinecraftClient client, float radius) {
+        if (client.player == null || client.world == null) return null;
+        ClientPlayerEntity player = client.player;
+
+        return client.world.getEntitiesByClass(PlayerEntity.class,
+                player.getBoundingBox().expand(radius), e -> {
+                    if (e == player || !e.isAlive()) return false;
+                    if (player.distanceTo(e) > radius) return false;
+                    if (TargetHelper.heightAbove(player, e) < TRIGGER_HEIGHT) return false;
+                    boolean gliding = e.isGliding();
+                    boolean falling = !e.isOnGround() && e.getVelocity().y < -0.1;
+                    return gliding || falling;
+                })
+                .stream()
+                .min((a, b) -> Double.compare(player.distanceTo(a), player.distanceTo(b)))
+                .orElse(null);
+    }
+
+    /** Public — called from the disconnect cleanup + kill switch. */
+    public static void hardReset(MinecraftClient client) { deactivate(client, true); }
+
+    /** Q12: true while the shield hold is engaged — other features suspend. */
+    public static boolean isTriggered() { return triggered; }
+
+    /**
+     * V4.1.2 rule (the "can't eat" fix): a complete NO-OP unless this
+     * feature was actually engaged. Only touches input state it owns.
      *
      * @param restoreSlot false when the player manually switched slots —
      *                    their manual choice wins, never yank it back.
      */
     private static void deactivate(MinecraftClient client, boolean restoreSlot) {
-        boolean wasActive = active;
-        active = false;
-        if (wasActive && client != null && client.options != null) {
+        boolean wasTriggered = triggered;
+        triggered = false;
+        if (wasTriggered && client != null && client.options != null && useKeyHeldByUs) {
             client.options.useKey.setPressed(false);
+            useKeyHeldByUs = false;
         }
-        if (wasActive && restoreSlot && client != null
-                && client.player != null && prevSlot != -1) {
+        if (wasTriggered && restoreSlot && client != null
+                && client.player != null && prevSlot != -1 && shieldSlot != -1) {
             InventoryHelper.switchToSlot(client, prevSlot);
         }
-        prevSlot      = -1;
-        shieldSlot    = -1;
+        prevSlot = -1;
+        shieldSlot = -1;
         lastKnownSlot = -1;
     }
 

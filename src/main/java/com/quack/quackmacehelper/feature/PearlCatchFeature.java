@@ -11,15 +11,24 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * PearlCatch — Stage 4 polish.
+ * PearlCatch — V5.
  *
- * Fires a wind charge to intercept the player's own ender pearl mid-flight,
- * knocking them upward at the pearl's landing point for a mace combo.
+ * Watches for THE PLAYER'S OWN ender pearl being thrown (owner check —
+ * enemy and teammate pearls are IGNORED, confirmed Q3) whose arc will rise
+ * MORE than 10 blocks of height (V5: predicted APEX height above the
+ * player, measured from PLAYER positions per R3 — not the ground).
  *
- * Anti-cheat polish:
- *   - Intercept point gets a small random offset (±0.15 blocks) so the aim
- *     isn't a robotically perfect ballistic solution every single time.
- *   - Physics simulation unchanged (still accurate enough to hit).
+ * AUTOMATIC (default): simulate both trajectories precisely; solve where a
+ * wind charge thrown after the configured delay (1-3 ticks) will meet the
+ * pearl; instantly snap the camera onto the throw direction (no smoothing)
+ * and throw at exactly the right tick so the wind charge collides with the
+ * pearl mid-air.
+ *
+ * MANUAL: qualifying pearl detected -> just throw the wind charge after
+ * the configured delay. No camera movement, no math.
+ *
+ * ONE wind-charge throw per pearl — no retry on a miss (confirmed Q13).
+ * Requires a wind charge in the hotbar (R4).
  */
 public class PearlCatchFeature {
 
@@ -29,7 +38,7 @@ public class PearlCatchFeature {
     private static int              countdown      = -1;
     private static boolean          fired          = false;
     private static boolean          pearlWasAlive  = false;
-    private static boolean          autoReady      = false;
+    private static boolean          autoArmed      = false;
 
     private static final double WIND_CHARGE_SPEED = 1.5;
     private static final int    SOLVER_ITERATIONS = 8;
@@ -43,6 +52,8 @@ public class PearlCatchFeature {
 
         // Never auto-use items while a GUI is open (anticheat safety).
         if (client.currentScreen != null) return;
+        // AlwaysOnShield triggered owns all other feature actions (Q12)
+        if (AlwaysOnShieldFeature.isTriggered()) return;
 
         ClientPlayerEntity player = client.player;
         EnderPearlEntity   pearl  = findOurPearl(client);
@@ -58,7 +69,7 @@ public class PearlCatchFeature {
         if (trackedPearl == null) {
             trackedPearl = pearl;
             fired        = false;
-            autoReady    = false;
+            autoArmed    = false;
             countdown    = cfg.pearlCatch.manualMode ? cfg.pearlCatch.delayTicks : -1;
         }
 
@@ -70,22 +81,23 @@ public class PearlCatchFeature {
         if (cfg.pearlCatch.manualMode) {
             if (countdown > 0) { countdown--; return; }
             fireAt(client, player, pearl, wcSlot, true);
-
         } else {
-            double heightAbove = trackedPearl.getY() - player.getY();
-            if (heightAbove < cfg.pearlCatch.triggerHeight) return;
-            if (!autoReady) { autoReady = true; return; } // 1-tick buffer
+            // V5: trigger on the PREDICTED APEX of the arc (player heights,
+            // R3) — not on wherever the pearl happens to be right now.
+            double apexAbove = predictedApexHeight(pearl) - player.getY();
+            if (apexAbove < cfg.pearlCatch.triggerHeight) return;
+            if (!autoArmed) { autoArmed = true; return; } // 1-tick buffer
             fireAt(client, player, pearl, wcSlot, false);
         }
     }
 
     /**
-     * @param manual true when the user fired in manual mode — the camera is
-     *               NEVER redirected at the pearl (the user aims themselves);
+     * @param manual true when fired in manual mode — the camera is NEVER
+     *               redirected at the pearl (the player aims themselves);
      *               we only switch to the wind charge and right-click it.
      */
     private static void fireAt(MinecraftClient client, ClientPlayerEntity player,
-                                EnderPearlEntity pearl, int wcSlot, boolean manual) {
+                               EnderPearlEntity pearl, int wcSlot, boolean manual) {
         double px  = pearl.getX(),  py  = pearl.getY(),  pz  = pearl.getZ();
         double pvx = pearl.getVelocity().x;
         double pvy = pearl.getVelocity().y;
@@ -120,13 +132,29 @@ public class PearlCatchFeature {
         InventoryHelper.switchToSlot(client, wcSlot);
         client.interactionManager.interactItem(player, Hand.MAIN_HAND);
         InventoryHelper.switchToSlot(client, prevSlot);
-        fired = true;
+        fired = true; // ONE throw per pearl — no retry (Q13)
+    }
+
+    /** Simulates the pearl forward and returns the highest Y it will reach. */
+    private static double predictedApexHeight(EnderPearlEntity pearl) {
+        double vx = pearl.getVelocity().x;
+        double vy = pearl.getVelocity().y;
+        double vz = pearl.getVelocity().z;
+        double x = pearl.getX(), y = pearl.getY(), z = pearl.getZ();
+        double apex = y;
+        // Drag-then-gravity vanilla order; stop at apex (vy <= 0)
+        for (int i = 0; i < 200 && vy > 0; i++) {
+            vx *= PEARL_DRAG; vy *= PEARL_DRAG; vz *= PEARL_DRAG;
+            vy -= PEARL_GRAVITY;
+            x += vx; y += vy; z += vz;
+            if (y > apex) apex = y;
+        }
+        return apex;
     }
 
     private static Vec3d simulatePearl(double x, double y, double z,
                                         double vx, double vy, double vz, int ticks) {
-        // Vanilla order: DRAG first, then gravity. The old gravity-then-drag
-        // order damped gravity itself, so long flights drifted low.
+        // Vanilla order: DRAG first, then gravity.
         for (int i = 0; i < ticks; i++) {
             vx *= PEARL_DRAG; vy *= PEARL_DRAG; vz *= PEARL_DRAG;
             vy -= PEARL_GRAVITY;
@@ -140,7 +168,7 @@ public class PearlCatchFeature {
         List<EnderPearlEntity> list = client.world.getEntitiesByClass(
             EnderPearlEntity.class,
             client.player.getBoundingBox().expand(128),
-            p -> p.getOwner() == client.player
+            p -> p.getOwner() == client.player   // OWN pearls only (Q3)
         );
         return list.isEmpty() ? null : list.get(0);
     }
@@ -150,6 +178,6 @@ public class PearlCatchFeature {
 
     private static void reset() {
         trackedPearl = null; countdown = -1;
-        fired = false; pearlWasAlive = false; autoReady = false;
+        fired = false; pearlWasAlive = false; autoArmed = false;
     }
 }

@@ -1,7 +1,9 @@
 package com.quack.quackmacehelper.feature;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Random;
@@ -13,12 +15,15 @@ import java.util.Random;
  * Within whichever zone is requested, we pick a RANDOM point — never the
  * same position twice — so the rotation pattern is never perfectly periodic.
  *
- * aimPoint values:
+ * aimPoint values (V5 config domain):
  *   0 = HEAD   (top 33% of hitbox)
  *   1 = CENTER (middle 33%)
  *   2 = FEET   (bottom 33%)
- *   3 = FULL   (entire hitbox — used by ElytraSwapper / StunSlam / ShieldDrain
- *               where we just want "somewhere on the target")
+ *   3 = AUTO   (Wurst-style: the CLOSEST point of the hitbox to the
+ *               player's eyes — eye position clamped onto the box; the
+ *               4th AimAt option added in V5)
+ *   4 = FULL   (entire hitbox — internal use by combat features that just
+ *               want "somewhere on the target")
  */
 public class RandomAim {
 
@@ -30,6 +35,22 @@ public class RandomAim {
      */
     public static Vec3d randomPoint(LivingEntity entity, int aimPoint) {
         Box box = entity.getBoundingBox();
+
+        if (aimPoint == 3) { // AUTO — Wurst closest-hitbox-point to the eyes
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player != null) {
+                Vec3d eyes = client.player.getEyePos();
+                Vec3d clamped = new Vec3d(
+                        MathHelper.clamp(eyes.x, box.minX, box.maxX),
+                        MathHelper.clamp(eyes.y, box.minY, box.maxY),
+                        MathHelper.clamp(eyes.z, box.minZ, box.maxZ));
+                // If the eyes are inside the box the clamp is a no-op and we
+                // are already as close as possible — return it directly.
+                return clamped;
+            }
+            aimPoint = 1; // fallback: center
+        }
+
         double height = box.maxY - box.minY;
 
         double yMin, yMax;
@@ -42,7 +63,7 @@ public class RandomAim {
                 yMin = box.minY + 0.05;
                 yMax = box.minY + height * (1.0 / 3.0);
             }
-            case 3 -> { // FULL — anywhere in the box
+            case 4 -> { // FULL — anywhere in the box (internal)
                 yMin = box.minY + height * 0.05;
                 yMax = box.maxY - height * 0.05;
             }
@@ -69,6 +90,6 @@ public class RandomAim {
      * Convenience: random point anywhere on the hitbox (aimPoint = FULL).
      */
     public static Vec3d randomFull(LivingEntity entity) {
-        return randomPoint(entity, 3);
+        return randomPoint(entity, 4);
     }
 }

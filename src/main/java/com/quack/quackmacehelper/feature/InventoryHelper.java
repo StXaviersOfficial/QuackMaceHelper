@@ -4,7 +4,10 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.item.*;
+import net.minecraft.item.AxeItem;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.entry.RegistryEntry;
@@ -37,7 +40,7 @@ public class InventoryHelper {
     public static int findBreachMaceSlot(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            if (isMace(stack) && hasEnchantmentType(stack, "breach")) return i;
+            if (isMace(stack) && getEnchantmentLevel(stack, "breach") > 0) return i;
         }
         return -1;
     }
@@ -46,7 +49,7 @@ public class InventoryHelper {
     public static int findDensityMaceSlot(ClientPlayerEntity player) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            if (isMace(stack) && hasEnchantmentType(stack, "density")) return i;
+            if (isMace(stack) && getEnchantmentLevel(stack, "density") > 0) return i;
         }
         return -1;
     }
@@ -76,12 +79,30 @@ public class InventoryHelper {
         return -1;
     }
 
-    /** Returns hotbar slot of ender pearl, or -1 */
-    public static int findEnderPearlSlot(ClientPlayerEntity player) {
-        for (int i = 0; i < 9; i++) {
-            if (player.getInventory().getStack(i).getItem() == Items.ENDER_PEARL) return i;
-        }
+    /** Returns hotbar slot of a chestplate (best tier first), or -1. */
+    public static int findChestplateHotbarSlot(ClientPlayerEntity player) {
+        Item[] tiers = {
+            Items.NETHERITE_CHESTPLATE, Items.DIAMOND_CHESTPLATE, Items.IRON_CHESTPLATE,
+            Items.COPPER_CHESTPLATE, Items.GOLDEN_CHESTPLATE,
+            Items.CHAINMAIL_CHESTPLATE, Items.LEATHER_CHESTPLATE
+        };
+        for (Item tier : tiers)
+            for (int i = 0; i < 9; i++)
+                if (player.getInventory().getStack(i).getItem() == tier) return i;
         return -1;
+    }
+
+    // ── Trigger-item checks (V5 AttributeSwap domain) ──────────────────────
+
+    /** 1.21.11 spears ("Mounts of Mayhem"): item id path ends with "_spear". */
+    public static boolean isSpear(ItemStack stack) {
+        return !stack.isEmpty() && net.minecraft.registry.Registries.ITEM
+                .getId(stack.getItem()).getPath().endsWith("_spear");
+    }
+
+    /** True when the stack is a spear WITHOUT Lunge (the AttributeSwap trigger). */
+    public static boolean isSpearWithoutLunge(ItemStack stack) {
+        return isSpear(stack) && getEnchantmentLevel(stack, "lunge") == 0;
     }
 
     // ── Swap helpers ─────────────────────────────────────────────────────────
@@ -94,10 +115,8 @@ public class InventoryHelper {
      * ClientPlayerEntity.tick(), which runs BEFORE the mod's END_CLIENT_TICK
      * hooks. Any feature that switches and attacks/uses in the same tick used
      * to send the action packet BEFORE the slot packet, so the server resolved
-     * the action with the PREVIOUSLY held item — BreachSwap hit with the sword,
-     * and PearlCatch/WindChargeTackle (which switch and switch back within one
-     * tick) never sent a slot packet at all, so the wind charge was never
-     * actually thrown. Sending the packet explicitly here fixes all of them.
+     * the action with the PREVIOUSLY held item. Sending the packet explicitly
+     * here fixes all of them.
      */
     public static void switchToSlot(MinecraftClient client, int slot) {
         if (slot < 0 || slot > 8 || client.player == null) return;
@@ -124,18 +143,15 @@ public class InventoryHelper {
         return entity.isBlocking() && entity.getActiveItem().getItem() == Items.SHIELD;
     }
 
-    private static boolean hasEnchantmentType(ItemStack stack, String enchId) {
-        return getEnchantmentLevel(stack, enchId) > 0;
-    }
-
-    private static int getEnchantmentLevel(ItemStack stack, String enchId) {
+    public static int getEnchantmentLevel(ItemStack stack, String enchId) {
         var enchantments = EnchantmentHelper.getEnchantments(stack);
+        int best = 0;
         for (var entry : enchantments.getEnchantments()) {
             Optional<RegistryKey<Enchantment>> key = entry.getKey();
             if (key.isPresent() && key.get().getValue().getPath().contains(enchId)) {
-                return enchantments.getLevel(entry);
+                best = Math.max(best, enchantments.getLevel(entry));
             }
         }
-        return 0;
+        return best;
     }
 }

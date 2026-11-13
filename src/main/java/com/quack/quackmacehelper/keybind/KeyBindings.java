@@ -12,11 +12,11 @@ import org.lwjgl.glfw.GLFW;
  * Call once per tick.
  *
  * Key codes: plain GLFW keyboard codes, OR 500+button for mouse buttons
- * (GLFW keyboard codes stop at ~348, so 500-507 = mouse buttons 0-7 is
- * an unambiguous encoding — lets users bind mouse side buttons etc.)
+ * (GLFW keyboard codes stop at ~348, so 500-507 = mouse buttons 0-7 is an
+ * unambiguous encoding — lets users bind mouse side buttons etc.)
  *
- * V4.1.1: while ANY screen is open, keybinds are suppressed — typing "n"
- * in chat used to toggle Aim Assist, and the menu key fired from inside
+ * While ANY screen is open, keybinds are suppressed — typing "n" in chat
+ * must never toggle anything, and the menu key must not fire from inside
  * other GUIs.
  */
 public class KeyBindings {
@@ -81,14 +81,14 @@ public class KeyBindings {
                 : "Key " + keyCode;
     }
 
-    // Convenience accessors using config values
+    // Convenience accessors using config values (V5 set)
     public static boolean openGui()                { return wasPressed(ModConfig.get().keybinds.openGui); }
     public static boolean toggleAimAssist()        { return wasPressed(ModConfig.get().keybinds.toggleAimAssist); }
-    public static boolean toggleBreachSwap()       { return wasPressed(ModConfig.get().keybinds.toggleBreachSwap); }
+    public static boolean toggleAttributeSwap()    { return wasPressed(ModConfig.get().keybinds.toggleAttributeSwap); }
     public static boolean toggleStunSlam()         { return wasPressed(ModConfig.get().keybinds.toggleStunSlam); }
     public static boolean togglePearlCatch()       { return wasPressed(ModConfig.get().keybinds.togglePearlCatch); }
     public static boolean toggleShieldDraining()   { return wasPressed(ModConfig.get().keybinds.toggleShieldDraining); }
-    public static boolean toggleElytraSwapper()    { return wasPressed(ModConfig.get().keybinds.toggleElytraSwapper); }
-    public static boolean toggleWindChargeTackle() { return wasPressed(ModConfig.get().keybinds.toggleWindChargeTackle); }
     public static boolean toggleAlwaysOnShield()   { return wasPressed(ModConfig.get().keybinds.toggleAlwaysOnShield); }
+    public static boolean toggleElytraMace()       { return wasPressed(ModConfig.get().keybinds.toggleElytraMace); }
+    public static boolean toggleAutoMace()         { return wasPressed(ModConfig.get().keybinds.toggleAutoMace); }
 }

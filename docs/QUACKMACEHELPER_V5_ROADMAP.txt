@@ -440,12 +440,10 @@ ROUND 2 - ANSWERED 2026-11-13 (locked into this file + master prompt):
   Q13 PearlCatch -> one wind charge per pearl, no retry. Confirmed.
   Q14 Release height -> +2. Confirmed.
 
-STILL OPEN (minor, non-blocking - answer via ntfy whenever):
-  M1. AimAssist speed slider MAX: I set 7200 deg/s (= 360 deg per tick; the
-      code already treats >= 7200 as snap). OK, or different cap?
-  M2. AimAt default option: Head (options are Head/Center/Feet/Auto). OK?
-  M3. 4.1.2 hotfix is 1.21.11 only. Want the same fix backported to the
-      1.21.1 branch (4.1.2 for MC 1.21.1) too, or is 1.21.11 all you play?
+MINOR QUESTIONS - ANSWERED 2026-11-13 (round 3):
+  M1. AimAssist speed slider max: 7200 deg/s. Confirmed.
+  M2. AimAt default: Head. Confirmed.
+  M3. 4.1.2 eat hotfix stays 1.21.11-only (that is all the boss plays).
 
 ================================================================================
 SECTION 7 - SIDE TRACKS STATUS (for context)

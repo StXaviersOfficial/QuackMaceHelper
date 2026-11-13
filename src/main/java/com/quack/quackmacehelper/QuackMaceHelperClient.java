@@ -10,14 +10,23 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 
 /**
- * QuackMaceHelper — client entrypoint.
+ * QuackMaceHelper — V5 client entrypoint.
+ *
+ * MASTER KILL SWITCH (R1): when masterEnabled is false the mod behaves as
+ * if it never existed — no feature ticks, no mixins act, no HUD, no
+ * feature keybinds respond. ONLY the mod-menu open key (and the ModMenu
+ * entry) stay alive so the mod can be re-enabled in-game. All feature
+ * state is hard-reset the moment the switch turns off.
  *
  * Menu access: ModMenu ("Mods" -> QuackMaceHelper -> Config) or the
  * configurable "Open Menu Key" in the General tab. There is intentionally
- * NO /qm or /quackmace chat command — chat commands get forwarded to the
- * server and rejected on servers that don't know them.
+ * NO chat command — chat commands get forwarded to the server and rejected
+ * on servers that don't know them.
  */
 public class QuackMaceHelperClient implements ClientModInitializer {
+
+    /** Tracks the kill-switch edge so state is cleared exactly once. */
+    private static boolean masterWasOn = true;
 
     @Override
     public void onInitializeClient() {
@@ -27,22 +36,31 @@ public class QuackMaceHelperClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
 
-            // ── Keybind toggles ────────────────────────────────────────────
-            ModConfig cfg = ModConfig.get();
-
+            // ── The menu key ALWAYS works (kill switch exemption, R1) ────
             if (KeyBindings.openGui())
                 openQuackMaceScreen(client);
 
+            ModConfig cfg = ModConfig.get();
+
+            // ── MASTER KILL SWITCH ───────────────────────────────────────
+            if (!cfg.masterEnabled) {
+                if (masterWasOn) hardResetEverything(client);
+                masterWasOn = false;
+                return; // nothing else runs — mod fully inert
+            }
+            if (!masterWasOn) masterWasOn = true;
+
+            // ── Keybind toggles (all features, save + HUD toast) ────────
             if (KeyBindings.toggleAimAssist()) {
                 cfg.aimAssist.enabled = !cfg.aimAssist.enabled;
                 if (!cfg.aimAssist.enabled) AimAssistFeature.clearTarget();
                 ModConfig.save();
                 HudOverlay.showMessage("Aim Assist", cfg.aimAssist.enabled);
             }
-            if (KeyBindings.toggleBreachSwap()) {
-                cfg.breachSwap.enabled = !cfg.breachSwap.enabled;
+            if (KeyBindings.toggleAttributeSwap()) {
+                cfg.attributeSwap.enabled = !cfg.attributeSwap.enabled;
                 ModConfig.save();
-                HudOverlay.showMessage("Breach Swap", cfg.breachSwap.enabled);
+                HudOverlay.showMessage("Attribute Swap", cfg.attributeSwap.enabled);
             }
             if (KeyBindings.toggleStunSlam()) {
                 cfg.stunSlam.enabled = !cfg.stunSlam.enabled;
@@ -56,53 +74,54 @@ public class QuackMaceHelperClient implements ClientModInitializer {
             }
             if (KeyBindings.toggleShieldDraining()) {
                 cfg.shieldDraining.enabled = !cfg.shieldDraining.enabled;
+                ShieldDrainingFeature.onToggled(cfg.shieldDraining.enabled);
                 ModConfig.save();
-                HudOverlay.showMessage("Shield Drain", cfg.shieldDraining.enabled);
-            }
-            if (KeyBindings.toggleElytraSwapper()) {
-                cfg.elytraSwapper.enabled = !cfg.elytraSwapper.enabled;
-                ModConfig.save();
-                HudOverlay.showMessage("Elytra Swap", cfg.elytraSwapper.enabled);
-            }
-            if (KeyBindings.toggleWindChargeTackle()) {
-                cfg.windChargeTackle.enabled = !cfg.windChargeTackle.enabled;
-                ModConfig.save();
-                HudOverlay.showMessage("Wind Tackle", cfg.windChargeTackle.enabled);
+                HudOverlay.showMessage("Shield Draining", cfg.shieldDraining.enabled);
             }
             if (KeyBindings.toggleAlwaysOnShield()) {
                 cfg.alwaysOnShield.enabled = !cfg.alwaysOnShield.enabled;
                 ModConfig.save();
                 HudOverlay.showMessage("Always Shield", cfg.alwaysOnShield.enabled);
             }
+            if (KeyBindings.toggleElytraMace()) {
+                cfg.elytraMace.enabled = !cfg.elytraMace.enabled;
+                ModConfig.save();
+                HudOverlay.showMessage("Elytra Mace", cfg.elytraMace.enabled);
+            }
+            if (KeyBindings.toggleAutoMace()) {
+                cfg.autoMace.enabled = !cfg.autoMace.enabled;
+                ModConfig.save();
+                HudOverlay.showMessage("Auto Mace", cfg.autoMace.enabled);
+            }
 
-            // ── Feature ticks (single source of truth — see note) ─────────
-            // NOTE: features are ticked ONLY here. An earlier version also
-            // ticked them from GameRendererMixin, which made every feature
-            // run TWICE per game tick (double CPS, halved delays — the root
-            // cause of PearlCatch manual mode firing instantly).
+            // ── Feature ticks ────────────────────────────────────────────
             if (client.player == null || client.world == null) {
-                // Left a world / disconnected: clear every feature's state so
-                // nothing holds a stale entity across worlds.
-                AimAssistFeature.clearTarget();
-                ElytraSwapperFeature.hardReset(client);
-                StunSlamFeature.hardReset();
-                PearlCatchFeature.hardReset();
-                BreachSwapFeature.hardReset();
-                ShieldDrainingFeature.stop();
-                AlwaysOnShieldFeature.hardReset(client);
+                hardResetEverything(client);
                 return;
             }
 
             AimAssistFeature.onGameTick(client);
-            BreachSwapFeature.tick(client);
+            AttributeSwapFeature.tick(client);
             StunSlamFeature.tick(client);
             PearlCatchFeature.tick(client);
-            ElytraSwapperFeature.tick(client);
-            WindChargeTackleFeature.tick(client);
+            ShieldDrainingFeature.tick(client);
             AlwaysOnShieldFeature.tick(client);
-            // ShieldDrainingFeature no longer has a tick() — it is a pure
-            // modifier driven by ElytraSwapper when a shield is detected.
+            ElytraMaceFeature.tick(client);
+            AutoMaceFeature.tick(client);
         });
+    }
+
+    /** Clears every feature's state (kill switch, world exit, disconnect). */
+    private static void hardResetEverything(MinecraftClient client) {
+        AimAssistFeature.clearTarget();
+        AimAssistFeature.stopFeatureAim();
+        AttributeSwapFeature.hardReset();
+        StunSlamFeature.hardReset();
+        PearlCatchFeature.hardReset();
+        ShieldDrainingFeature.stop();
+        AlwaysOnShieldFeature.hardReset(client);
+        ElytraMaceFeature.hardReset(client);
+        AutoMaceFeature.hardReset();
     }
 
     /**

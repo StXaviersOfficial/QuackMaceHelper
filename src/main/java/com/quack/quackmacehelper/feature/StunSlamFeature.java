@@ -8,141 +8,189 @@ import net.minecraft.entity.LivingEntity;
 import java.util.Random;
 
 /**
- * StunSlam — Stage 2 rewrite.
+ * StunSlam — V5 rewrite.
  *
- * Triggers while player is falling + target in range + target has shield.
+ * Constantly watches the player UNDER THE CROSSHAIR for a raised shield.
+ * No shield -> the feature does nothing at all.
  *
- * Sequence:
- *   1. Axe hit (1 hit, to break shield blocking)
- *   2. Random 0–2 tick gap
- *   3. Mace hits: 4–5 times, with 0–2 tick random gap between each
+ * Shield UP + the player attacks:
+ *  - GROUND CASE (player on ground / jumping / less than 3 blocks above the
+ *    target): same tick switch to axe -> axe hit lands SAME tick OR next
+ *    tick (random 0-1) -> switch back to the held item.
+ *  - FALLING CASE (player 3+ blocks above the target, R3 body heights):
+ *    same tick switch to axe -> 4-5 axe hits within the next 0-1 ticks ->
+ *    switch to the best-damage mace (DamageCalculator) -> 5-6 mace hits
+ *    within the next 2-3 ticks -> NEXT tick switch back to the original.
  *
- * All aim via RandomAim.randomFull so no fixed aim point is detectable.
- *
- * When ElytraSwapper is active, StunSlam does NOT self-trigger — but
- * ElytraSwapper already handles axe+mace internally so they don't conflict.
+ * COLLISION:
+ *  - ShieldDraining enabled + target shielded -> StunSlam must NOT run at
+ *    all (drain owns the shielded scenario, no axe — the shield staying up
+ *    is the point).
+ *  - AttributeSwap owns the same-tick swap chain: if it fires on the same
+ *    hit, StunSlam queues behind it (starts the next tick).
  */
 public class StunSlamFeature {
 
     private static final Random RNG = new Random();
 
-    private enum Phase { IDLE, AXE, MACE }
-
+    private enum Phase { IDLE, PENDING, AXE, MACE_GAP, MACE, RESTORE }
     private static Phase phase = Phase.IDLE;
+
     private static LivingEntity target = null;
-    private static int tickDelay = 0;
-    private static int maceHitsLeft = 0;
-    /** Hard cap so the MACE phase can never loop forever (no mace found /
-     *  target kiting just out of reach used to spin the camera indefinitely). */
+    private static int  tickDelay      = 0;
+    private static int  axeHitsLeft    = 0;
+    private static int  maceHitsLeft   = 0;
+    private static int  maceSpanTicks  = 2;   // 2-3 randomized
+    private static int  maceCurrentTick = 0;
+    private static int  prevSlot       = -1;
     private static long sequenceStartMs = 0L;
-    private static final long MAX_SEQUENCE_MS = 4000L;
-    /** Give-up range — past this the target has escaped. */
-    private static final float GIVE_UP_RANGE = 4.5f;
+    private static final long MAX_SEQUENCE_MS = 6000L;
+    private static final float ATTACK_RANGE   = 3.2f;
+
+    /** Called from the attack mixin on the player's own attacks. */
+    public static void onAttack(MinecraftClient client, LivingEntity hitTarget) {
+        ModConfig cfg = ModConfig.get();
+        if (!cfg.stunSlam.enabled) return;
+        if (phase != Phase.IDLE) return;
+        if (client.player == null || client.currentScreen != null) return;
+
+        ClientPlayerEntity player = client.player;
+
+        // Only reacts to the crosshair-watched target having a raised shield.
+        // (The mixin target IS the crosshair target in practice — the player
+        // attacks what they are looking at.)
+        if (hitTarget == null || !hitTarget.isAlive()) return;
+        if (!TargetHelper.isValidTarget(hitTarget, cfg)) return;
+        if (!InventoryHelper.isHoldingShield(hitTarget)) return;
+
+        // COLLISION: ShieldDraining owns the shielded scenario entirely.
+        if (cfg.shieldDraining.enabled && ShieldDrainingFeature.isTargetOwned(hitTarget)) return;
+        // Other owning sequences suppress StunSlam.
+        if (ElytraMaceFeature.sequenceActive || AutoMaceFeature.isRunning()) return;
+        if (AlwaysOnShieldFeature.isTriggered()) return;
+
+        boolean falling3Above = TargetHelper.is3Above(player, hitTarget)
+                && !player.isOnGround();
+
+        target = hitTarget;
+        prevSlot = player.getInventory().getSelectedSlot();
+        sequenceStartMs = System.currentTimeMillis();
+
+        if (falling3Above) {
+            // FALLING CASE: axe 4-5 hits in 0-1 ticks, then mace 5-6 in 2-3.
+            axeHitsLeft  = 4 + RNG.nextInt(2);
+            maceHitsLeft = 5 + RNG.nextInt(2);
+            maceSpanTicks = 2 + RNG.nextInt(2);
+            phase = Phase.PENDING; // queue behind AttributeSwap if it fired
+            tickDelay = AttributeSwapFeature.isSwapping() ? 1 : RNG.nextInt(2);
+        } else {
+            // GROUND CASE: one axe hit, same tick or next (random 0-1).
+            axeHitsLeft  = 1;
+            maceHitsLeft = 0;
+            phase = Phase.PENDING;
+            tickDelay = AttributeSwapFeature.isSwapping() ? 1 : RNG.nextInt(2);
+        }
+    }
 
     public static void tick(MinecraftClient client) {
         ModConfig cfg = ModConfig.get();
         if (!cfg.stunSlam.enabled) { reset(); return; }
         if (client.player == null || client.world == null) return;
-
-        // Never run with a GUI open (anticheat safety).
         if (client.currentScreen != null) { reset(); return; }
 
-        // Don't self-trigger while ElytraSwapper is running
-        if (ElytraSwapperFeature.sequenceActive && phase == Phase.IDLE) return;
+        if (phase == Phase.IDLE) return;
 
         ClientPlayerEntity player = client.player;
 
-        if (phase == Phase.IDLE) {
-            // Suppressed while Shield Drain is enabled: drain owns the
-            // "shield up" scenario inside ElytraSwapper (no axe at all).
-            if (cfg.shieldDraining.enabled) return;
-
-            // Trigger condition: airborne and actually falling. NOTE:
-            // fallDistance stays 0 while elytra-gliding (Minecraft resets
-            // it during flight), so we also accept a clear downward velocity.
-            boolean falling = !player.isOnGround()
-                    && (player.fallDistance >= 1.5f || player.getVelocity().y < -0.3);
-            if (!falling) return;
-            // Elytra gliding is ElytraSwapper's job, not ours.
-            if (player.isGliding()) return;
-
-            LivingEntity t = findTarget(client, player);
-            if (t == null) return;
-            // StunSlam is the anti-shield combo — the target must actually
-            // have the shield UP for the axe hit to matter.
-            if (!InventoryHelper.isHoldingShield(t)) return;
-
-            target = t;
-            maceHitsLeft = 4 + RNG.nextInt(2); // 4 or 5
-            sequenceStartMs = System.currentTimeMillis();
-            phase = Phase.AXE;
-            tickDelay = 0;
+        // Hard stops
+        if (target == null || !target.isAlive()
+                || System.currentTimeMillis() - sequenceStartMs > MAX_SEQUENCE_MS) {
+            reset();
+            return;
+        }
+        // Collision re-check while running (drain may have started)
+        if (cfg.shieldDraining.enabled && ShieldDrainingFeature.isTargetOwned(target)) {
+            reset();
+            return;
         }
 
         if (tickDelay > 0) { tickDelay--; return; }
-        if (target == null || !target.isAlive()) { reset(); return; }
 
         switch (phase) {
-            case AXE -> {
-                // Aim randomly at target
-                AimAssistFeature.elytraAimTick(client, target);
-
+            case PENDING -> {
                 int axe = InventoryHelper.findAxeSlot(player);
-                if (axe != -1) {
-                    InventoryHelper.switchToSlot(client, axe);
+                if (axe == -1) { reset(); return; }
+                InventoryHelper.switchToSlot(client, axe);
+                phase = Phase.AXE;
+            }
+
+            case AXE -> {
+                int axe = InventoryHelper.findAxeSlot(player);
+                if (axe == -1) { reset(); return; }
+                InventoryHelper.switchToSlot(client, axe);
+                AimAssistFeature.snapAimAt(client, RandomAim.randomFull(target));
+                if (player.distanceTo(target) <= ATTACK_RANGE) {
                     client.interactionManager.attackEntity(player, target);
+                    axeHitsLeft--;
+                } else {
+                    axeHitsLeft = 0;
                 }
+                if (axeHitsLeft <= 0) {
+                    if (maceHitsLeft > 0) {
+                        phase = Phase.MACE_GAP;
+                        tickDelay = RNG.nextInt(2); // 0-1 tick gap after axe burst
+                    } else {
+                        phase = Phase.RESTORE;
+                        tickDelay = 0;
+                    }
+                }
+                // Remaining axe hits stay inside the same 0-1 tick window:
+                // extra hits land next tick at the latest.
+                if (axeHitsLeft > 0) tickDelay = Math.min(tickDelay, 1);
+            }
+
+            case MACE_GAP -> {
+                int mace = DamageCalculator.bestMaceSlot(player);
+                if (mace == -1) { reset(); return; }
+                InventoryHelper.switchToSlot(client, mace);
                 phase = Phase.MACE;
-                tickDelay = RNG.nextInt(3); // 0–2 ticks
+                maceCurrentTick = 0;
             }
 
             case MACE -> {
-                if (!target.isAlive()) { reset(); return; }
-
-                // Exit guards — the old code could spin here forever with the
-                // camera locked on when the mace was missing or the target
-                // hovered just outside 3.5 blocks.
-                if (System.currentTimeMillis() - sequenceStartMs > MAX_SEQUENCE_MS) { reset(); return; }
-                if (player.isOnGround() && player.distanceTo(target) > GIVE_UP_RANGE) { reset(); return; }
-
-                // Refresh random aim each hit
-                AimAssistFeature.elytraAimTick(client, target);
-
-                int mace = InventoryHelper.findDensityMaceSlot(player);
-                if (mace == -1) mace = InventoryHelper.findBreachMaceSlot(player);
-                if (mace == -1) mace = InventoryHelper.findAnyMaceSlot(player);
-
-                if (mace == -1) { reset(); return; } // no mace — nothing to slam with
-
-                if (player.distanceTo(target) <= 3.5f) {
-                    InventoryHelper.switchToSlot(client, mace);
-                    client.interactionManager.attackEntity(player, target);
-                    maceHitsLeft--;
+                int mace = DamageCalculator.bestMaceSlot(player);
+                if (mace == -1) { reset(); return; }
+                InventoryHelper.switchToSlot(client, mace);
+                AimAssistFeature.snapAimAt(client, RandomAim.randomFull(target));
+                if (player.distanceTo(target) <= ATTACK_RANGE) {
+                    // Spread the 5-6 hits evenly across the 2-3 tick span
+                    int remainingTicks = Math.max(1, maceSpanTicks - maceCurrentTick);
+                    int hitsThisTick = (int) Math.ceil((double) maceHitsLeft / remainingTicks);
+                    for (int i = 0; i < hitsThisTick && maceHitsLeft > 0; i++) {
+                        client.interactionManager.attackEntity(player, target);
+                        maceHitsLeft--;
+                    }
+                } else {
+                    maceHitsLeft = 0;
                 }
-
-                if (maceHitsLeft <= 0 || !target.isAlive()) {
-                    reset();
-                    return;
+                maceCurrentTick++;
+                if (maceHitsLeft <= 0 || maceCurrentTick >= maceSpanTicks) {
+                    phase = Phase.RESTORE;
+                    tickDelay = 1; // swap back the NEXT tick (spec)
                 }
-
-                // 0–2 tick gap between mace hits
-                tickDelay = RNG.nextInt(3);
             }
 
-            default -> reset();
+            case RESTORE -> {
+                if (prevSlot != -1) {
+                    int sword = InventoryHelper.findSwordSlot(player);
+                    InventoryHelper.switchToSlot(client, sword != -1 ? sword : prevSlot);
+                }
+                reset();
+            }
         }
     }
 
-    private static LivingEntity findTarget(MinecraftClient client, ClientPlayerEntity player) {
-        LivingEntity t = AimAssistFeature.getCurrentTarget();
-        if (t == null) t = TargetHelper.findTarget(client, 3.5);
-        if (t != null && t.isAlive() && player.distanceTo(t) <= 3.5f) return t;
-        return null;
-    }
-
-    public static boolean isRunning() {
-        return phase != Phase.IDLE;
-    }
+    public static boolean isRunning() { return phase != Phase.IDLE; }
 
     /** Public hard reset — called when the player disconnects. */
     public static void hardReset() { reset(); }
@@ -151,7 +199,8 @@ public class StunSlamFeature {
         phase = Phase.IDLE;
         target = null;
         tickDelay = 0;
+        axeHitsLeft = 0;
         maceHitsLeft = 0;
-        AimAssistFeature.stopElytraAim();
+        prevSlot = -1;
     }
 }
